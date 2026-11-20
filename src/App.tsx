@@ -443,46 +443,118 @@ const parseSalaryRangeBounds = (rawRange: unknown, rawExpected = 0) => {
   return { min: single, max: single, hasSalary: single >= 500 };
 };
 
-// Smart Class Range Overlap Helper
-const parseClassNumbers = (text: string): Set<number> => {
-  const s = String(text || '').toLowerCase();
+// Smart Tutor Class Profile Parser & Matcher (operates strictly on tutor.classes without bio noise)
+interface TutorClassProfile {
+  grades: Set<number>;
+  isOLevelALevel: boolean;
+  isAdmission: boolean;
+  raw: string;
+}
+
+const parseTutorClassProfile = (classesList: unknown): TutorClassProfile => {
+  const rawItems = Array.isArray(classesList)
+    ? classesList
+    : typeof classesList === 'string'
+    ? [classesList]
+    : [];
+  const raw = rawItems
+    .join(' , ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .toLowerCase()
+    .trim();
   const grades = new Set<number>();
+  let isOLevelALevel = false;
+  let isAdmission = false;
 
   if (
-    s.includes('hsc') ||
-    s.includes('11') ||
-    s.includes('12') ||
-    s.includes('inter') ||
-    s.includes('college')
+    !raw ||
+    raw === 'not specified' ||
+    raw === 'science' ||
+    raw === 'biology' ||
+    raw === 'israt jahan' ||
+    raw === 'top class'
   ) {
-    grades.add(11);
-    grades.add(12);
-  }
-  if (s.includes('ssc') || s.includes('9') || s.includes('10')) {
-    grades.add(9);
-    grades.add(10);
-  }
-  if (s.includes('o level') || s.includes('a level') || s.includes('o/a')) {
-    grades.add(9);
-    grades.add(10);
-    grades.add(11);
-    grades.add(12);
-  }
-  if (s.includes('admission')) {
-    grades.add(13);
+    return { grades, isOLevelALevel, isAdmission, raw };
   }
 
-  const rangeRegex = /\b(\d{1,2})\s*[-–to]+\s*(\d{1,2})\b/g;
+  // O/A Level & English Medium detection
+  if (
+    /\b(o\s*['’\-/]?\s*level|a\s*['’\-/]?\s*level|o\/a|0\s*level|a2\s*level|edexcel|cambridge|english\s*medium|pre[\s\-]*o)/i.test(
+      raw
+    )
+  ) {
+    isOLevelALevel = true;
+  }
+
+  // Admission detection
+  if (/\b(admission|ভার্সিটি|মেডিকেল\s*এডমিশন)\b/i.test(raw)) {
+    isAdmission = true;
+  }
+
+  // Explicit "All", "Any", "Till HSC", "Play to degree"
+  if (/^(all|any\.?)$/i.test(raw) || /\b(till[\s\-]*hsc|play\s*to\s*degree)\b/i.test(raw)) {
+    for (let g = 1; g <= 12; g++) grades.add(g);
+  }
+
+  let normalized = raw
+    .replace(/\bten\b/gi, '10')
+    .replace(/\bnine\b/gi, '9')
+    .replace(/\beight\b/gi, '8')
+    .replace(/\bseven\b/gi, '7')
+    .replace(/\bsix\b/gi, '6')
+    .replace(/\bfive\b/gi, '5')
+    .replace(/\bfour\b/gi, '4')
+    .replace(/\bthree\b/gi, '3')
+    .replace(/\btwo\b/gi, '2')
+    .replace(/\bone\b/gi, '1')
+    .replace(/\b(play\s*group|playgroup|play|pg|nursery|kg|kindergarten|pre[\s\-]*school)\b/gi, '1')
+    .replace(/\bstd[\s\-]*v\b/gi, '5')
+    .replace(/\b8th\s*grade\b/gi, '8');
+
+  // Convert mixed range endpoints like "6 to HSC", "1 to A level", "5 to O level", "Upto O level"
+  normalized = normalized
+    .replace(
+      /\b(\d{1,2})\s*(?:[-–]|to)\s*(?:hsc|inter|intermediate|a\s*['’\-]?\s*levels?|a2\s*level|as\b)/gi,
+      '$1-12'
+    )
+    .replace(/\b(\d{1,2})\s*(?:[-–]|to)\s*(?:ssc|o\s*['’\-]?\s*levels?)/gi, '$1-10')
+    .replace(/\bupto\s*o\s*['’\-]?\s*levels?/gi, '1-10');
+
+  const hasHsc1st = /\b(hsc\s*1st|inter\s*1st|1st\s*year)\b/i.test(normalized);
+  const hasHsc2nd = /\b(hsc\s*2nd|inter\s*2nd|2nd\s*year)\b/i.test(normalized);
+  if (hasHsc1st) grades.add(11);
+  if (hasHsc2nd) grades.add(12);
+
+  // General HSC / Intermediate
+  if (!hasHsc1st && !hasHsc2nd && /\b(hsc|hcs|inter|intermediate)\b/i.test(raw)) {
+    grades.add(11);
+    grades.add(12);
+  }
+
+  // General SSC
+  if (/\b(ssc)\b/i.test(raw)) {
+    grades.add(9);
+    grades.add(10);
+  }
+
+  // Ranges like "1-5", "5 to 10", "1 to12", "03 to 12"
+  const rangeRegex =
+    /\b(\d{1,2})\s*(?:[-–/]|to)\s*(?:class[\s\-]*|std[\s\-]*|standard[\s\-]*)?(\d{1,2})\b/gi;
   let match: RegExpExecArray | null;
-  while ((match = rangeRegex.exec(s)) !== null) {
-    const start = parseInt(match[1], 10);
+  while ((match = rangeRegex.exec(normalized)) !== null) {
+    let start = parseInt(match[1], 10);
     const end = parseInt(match[2], 10);
+    if (start === 0) start = 1;
     if (start >= 1 && end <= 12 && start <= end) {
       for (let g = start; g <= end; g++) grades.add(g);
     }
   }
 
-  const singleNums = s.match(/\b(\d{1,2})\b/g);
+  const withoutRanges = normalized
+    .replace(rangeRegex, ' ')
+    .replace(/\b0\s*levels?\b/gi, ' ')
+    .replace(/\b(1st|2nd|3rd|\d+th)\s*year\b/gi, ' ');
+  const singleNums = withoutRanges.match(/\b(\d{1,2})\b/g);
   if (singleNums) {
     singleNums.forEach((n) => {
       const val = parseInt(n, 10);
@@ -490,7 +562,128 @@ const parseClassNumbers = (text: string): Set<number> => {
     });
   }
 
-  return grades;
+  return { grades, isOLevelALevel, isAdmission, raw };
+};
+
+const getTutorClassMatchResult = (
+  tutorClasses: unknown,
+  selectedClass: string
+): { matches: boolean; specificityBonus: number } => {
+  if (!selectedClass || selectedClass === 'All Classes') {
+    return { matches: true, specificityBonus: 0 };
+  }
+  const profile = parseTutorClassProfile(tutorClasses);
+  const sel = selectedClass.trim();
+  const totalGrades = profile.grades.size || 12;
+
+  if (sel === 'O/A Level') {
+    return {
+      matches: profile.isOLevelALevel,
+      specificityBonus: profile.isOLevelALevel ? (profile.grades.size === 0 ? 18 : 14) : 0,
+    };
+  }
+  if (sel === 'Admission') {
+    return {
+      matches: profile.isAdmission,
+      specificityBonus: profile.isAdmission ? (profile.grades.size <= 2 ? 18 : 14) : 0,
+    };
+  }
+  if (sel === 'HSC 1st Year' || sel === 'Class 11') {
+    if (!profile.grades.has(11)) return { matches: false, specificityBonus: 0 };
+    const isOnly11 = totalGrades === 1 && profile.grades.has(11);
+    const isDedicatedHsc = totalGrades <= 2 && !profile.grades.has(9) && !profile.grades.has(10);
+    return {
+      matches: true,
+      specificityBonus: isOnly11 ? 18 : isDedicatedHsc ? 15 : totalGrades <= 4 ? 10 : 5,
+    };
+  }
+  if (sel === 'HSC 2nd Year' || sel === 'Class 12') {
+    if (!profile.grades.has(12)) return { matches: false, specificityBonus: 0 };
+    const isOnly12 = totalGrades === 1 && profile.grades.has(12);
+    const isDedicatedHsc = totalGrades <= 2 && !profile.grades.has(9) && !profile.grades.has(10);
+    return {
+      matches: true,
+      specificityBonus: isOnly12 ? 18 : isDedicatedHsc ? 15 : totalGrades <= 4 ? 10 : 5,
+    };
+  }
+  if (sel === 'Class 11-12 (HSC)') {
+    const has11Or12 = profile.grades.has(11) || profile.grades.has(12);
+    if (!has11Or12) return { matches: false, specificityBonus: 0 };
+    const hasBoth = profile.grades.has(11) && profile.grades.has(12);
+    const isDedicated = totalGrades <= 2 && hasBoth;
+    return {
+      matches: true,
+      specificityBonus: isDedicated ? 18 : totalGrades <= 2 ? 15 : totalGrades <= 4 ? 10 : 5,
+    };
+  }
+  if (sel === 'Class 9-10 (SSC)') {
+    const has9Or10 = profile.grades.has(9) || profile.grades.has(10);
+    if (!has9Or10) return { matches: false, specificityBonus: 0 };
+    const isDedicated910 = totalGrades <= 2 && (profile.grades.has(9) || profile.grades.has(10));
+    return {
+      matches: true,
+      specificityBonus: isDedicated910 ? 18 : totalGrades <= 6 ? 12 : 5,
+    };
+  }
+  if (sel === 'Class 1-5') {
+    const count = [1, 2, 3, 4, 5].filter((g) => profile.grades.has(g)).length;
+    const matches = profile.grades.size === 1 ? count === 1 : count >= 2;
+    if (!matches) return { matches: false, specificityBonus: 0 };
+    const isExact15 = count === 5 && totalGrades === 5;
+    const isDedicated = count >= 4 && totalGrades <= 6;
+    return {
+      matches: true,
+      specificityBonus: isExact15 ? 18 : isDedicated ? 15 : totalGrades <= 8 ? 10 : 5,
+    };
+  }
+  if (sel === 'Class 6-8') {
+    const count = [6, 7, 8].filter((g) => profile.grades.has(g)).length;
+    const matches = profile.grades.size === 1 ? count === 1 : count >= 2;
+    if (!matches) return { matches: false, specificityBonus: 0 };
+    const isDedicated68 = !profile.grades.has(1) && !profile.grades.has(11) && totalGrades <= 5;
+    return {
+      matches: true,
+      specificityBonus: isDedicated68 ? 18 : totalGrades <= 6 ? 14 : 8,
+    };
+  }
+  if (sel === 'Class 5-10') {
+    const hasMiddle = [5, 6, 7, 8].some((g) => profile.grades.has(g));
+    const hasUpper = [9, 10].some((g) => profile.grades.has(g));
+    const count = [5, 6, 7, 8, 9, 10].filter((g) => profile.grades.has(g)).length;
+    const matches = hasMiddle && hasUpper && count >= 3;
+    if (!matches) return { matches: false, specificityBonus: 0 };
+    const isExact510 = count === 6 && totalGrades === 6;
+    return {
+      matches: true,
+      specificityBonus: isExact510 ? 18 : totalGrades <= 7 ? 14 : 8,
+    };
+  }
+  if (sel === 'Class 1-10') {
+    const hasPrimary = [1, 2, 3, 4].some((g) => profile.grades.has(g));
+    const hasHigh = [6, 7, 8, 9, 10].some((g) => profile.grades.has(g));
+    const count = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].filter((g) => profile.grades.has(g)).length;
+    const matches = hasPrimary && hasHigh && count >= 5;
+    if (!matches) return { matches: false, specificityBonus: 0 };
+    const isExact110 = count === 10 && totalGrades === 10;
+    return {
+      matches: true,
+      specificityBonus: isExact110 ? 18 : totalGrades <= 10 ? 14 : 8,
+    };
+  }
+
+  // Individual Class 1..12 or custom class string
+  const targetProfile = parseTutorClassProfile([sel]);
+  const targetGrades = Array.from(targetProfile.grades);
+  if (targetGrades.length === 0 || profile.grades.size === 0) {
+    return { matches: false, specificityBonus: 0 };
+  }
+  const matches = targetGrades.some((g) => profile.grades.has(g));
+  const isSingleExact =
+    matches && targetGrades.length === 1 && profile.grades.size === 1;
+  return {
+    matches,
+    specificityBonus: !matches ? 0 : isSingleExact ? 18 : totalGrades <= 4 ? 14 : 8,
+  };
 };
 
 // Extract supported Tuition Types from Tutor's tuitionType field & bio
@@ -664,6 +857,14 @@ const inferSubjectsForTutor = (
 const cleanTutorName = (rawName: unknown): string => {
   if (!rawName) return 'Unnamed Tutor';
   let s = String(rawName).trim();
+  if (/^https?:\/\/(www\.)?facebook\.com\//i.test(s)) {
+    const slug = s
+      .replace(/^https?:\/\/(www\.)?facebook\.com\//i, '')
+      .split(/[/?#]/)[0]
+      .replace(/[._-]+/g, ' ')
+      .trim();
+    if (slug) s = slug;
+  }
   s = s.replace(/Tanjিনা/gi, 'তানজিনা');
   s = s.replace(/Tanjina\s+আক্তার/gi, 'তানজিনা আক্তার');
   s = s.replace(/^[\u09BE-\u09CC\u09D7]+/, '');
@@ -1170,6 +1371,18 @@ const CLASSES_LIST = [
   'Class 11-12 (HSC)',
   'O/A Level',
   'Admission',
+  'Class 1',
+  'Class 2',
+  'Class 3',
+  'Class 4',
+  'Class 5',
+  'Class 6',
+  'Class 7',
+  'Class 8',
+  'Class 9',
+  'Class 10',
+  'Class 11',
+  'Class 12',
 ];
 
 interface CatalogEntry {
@@ -2563,6 +2776,17 @@ export default function App() {
     return Array.from(mapByLower.values()).sort((a, b) => a.localeCompare(b));
   }, []);
 
+  const updateRequirementsFilter = useCallback(
+    (updater: Partial<RequirementsState> | ((prev: RequirementsState) => RequirementsState)) => {
+      setRequirements((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
+        setAppliedRequirements(next);
+        return next;
+      });
+    },
+    []
+  );
+
   // Matched & Filtered Tutors Calculation
   const matchedTutors = useMemo(() => {
     const activeFilter = appliedRequirements;
@@ -2575,25 +2799,15 @@ export default function App() {
           const q = searchQuery.toLowerCase().trim();
           const hay = `${t.name} ${t.university} ${t.department} ${t.presentAddress} ${t.phone} ${(
             t.preferredAreas || []
-          ).join(' ')} ${(t.subjects || []).join(' ')} ${t.salaryRange || ''} ${
-            t.tuitionType || ''
-          } ${t.preferredDays || ''}`.toLowerCase();
+          ).join(' ')} ${(t.subjects || []).join(' ')} ${(t.classes || []).join(' ')} ${
+            t.salaryRange || ''
+          } ${t.tuitionType || ''} ${t.preferredDays || ''}`.toLowerCase();
           if (!hay.includes(q)) return false;
         }
 
         if (activeFilter.selectedClass && activeFilter.selectedClass !== 'All Classes') {
-          const targetGrades = parseClassNumbers(activeFilter.selectedClass);
-          const tutorClassText = `${(t.classes || []).join(' ')} ${t.bio || ''}`;
-          const tutorGrades = parseClassNumbers(tutorClassText);
-
-          if (targetGrades.size > 0) {
-            if (tutorGrades.size === 0) return false;
-            const hasOverlap = Array.from(targetGrades).some((g) => tutorGrades.has(g));
-            if (!hasOverlap) return false;
-          } else {
-            const cls = activeFilter.selectedClass.toLowerCase().replace('class ', '').trim();
-            if (!tutorClassText.toLowerCase().includes(cls)) return false;
-          }
+          const classMatch = getTutorClassMatchResult(t.classes, activeFilter.selectedClass);
+          if (!classMatch.matches) return false;
         }
 
         if (activeFilter.selectedSubjects.length > 0) {
@@ -2696,6 +2910,10 @@ export default function App() {
       .map((t) => {
         let score = 60;
         const bounds = parseSalaryRangeBounds(t.salaryRange, t.expectedSalary);
+        if (activeFilter.selectedClass && activeFilter.selectedClass !== 'All Classes') {
+          const classMatch = getTutorClassMatchResult(t.classes, activeFilter.selectedClass);
+          score += classMatch.specificityBonus;
+        }
         if (activeFilter.selectedAreas.length > 0) score += 18;
         if (activeFilter.selectedSubjects.length > 0) score += 12;
         if (activeFilter.selectedUniversity !== 'All Universities') score += 5;
@@ -2725,10 +2943,13 @@ export default function App() {
         };
       })
       .sort((a, b) => {
+        if ((b.matchScore || 0) !== (a.matchScore || 0)) {
+          return (b.matchScore || 0) - (a.matchScore || 0);
+        }
         if (isBudgetFilterActive && a.salaryMin !== b.salaryMin) {
           return a.salaryMin - b.salaryMin;
         }
-        return (b.matchScore || 0) - (a.matchScore || 0);
+        return 0;
       });
   }, [tutors, searchQuery, appliedRequirements]);
 
@@ -3607,7 +3828,7 @@ export default function App() {
                   <select
                     value={requirements.selectedClass}
                     onChange={(e) =>
-                      setRequirements({ ...requirements, selectedClass: e.target.value })
+                      updateRequirementsFilter({ selectedClass: e.target.value })
                     }
                     className="w-full px-3.5 py-2.5 text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
@@ -3632,8 +3853,7 @@ export default function App() {
                     onChange={(e) => {
                       const val = e.target.value;
                       if (val && !requirements.selectedSubjects.includes(val)) {
-                        setRequirements({
-                          ...requirements,
+                        updateRequirementsFilter({
                           selectedSubjects: [...requirements.selectedSubjects, val],
                         });
                       }
@@ -3660,8 +3880,7 @@ export default function App() {
                           {s}
                           <button
                             onClick={() =>
-                              setRequirements({
-                                ...requirements,
+                              updateRequirementsFilter({
                                 selectedSubjects: requirements.selectedSubjects.filter(
                                   (item) => item !== s
                                 ),
@@ -3687,7 +3906,7 @@ export default function App() {
                       <button
                         key={g}
                         type="button"
-                        onClick={() => setRequirements((prev) => ({ ...prev, preferredGender: g }))}
+                        onClick={() => updateRequirementsFilter({ preferredGender: g })}
                         className={`py-2 text-xs font-extrabold rounded-xl transition ${
                           requirements.preferredGender === g
                             ? 'bg-white text-emerald-700 shadow-sm'
@@ -3708,7 +3927,7 @@ export default function App() {
                   <select
                     value={requirements.selectedUniversity}
                     onChange={(e) =>
-                      setRequirements({ ...requirements, selectedUniversity: e.target.value })
+                      updateRequirementsFilter({ selectedUniversity: e.target.value })
                     }
                     className="w-full px-3.5 py-2.5 text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
@@ -3729,7 +3948,7 @@ export default function App() {
                   <select
                     value={requirements.selectedDepartment}
                     onChange={(e) =>
-                      setRequirements({ ...requirements, selectedDepartment: e.target.value })
+                      updateRequirementsFilter({ selectedDepartment: e.target.value })
                     }
                     className="w-full px-3.5 py-2.5 text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
@@ -3750,7 +3969,7 @@ export default function App() {
                     </label>
                     {requirements.selectedAreas.length > 0 && (
                       <button
-                        onClick={() => setRequirements({ ...requirements, selectedAreas: [] })}
+                        onClick={() => updateRequirementsFilter({ selectedAreas: [] })}
                         className="text-[11px] font-semibold text-slate-400 hover:text-rose-600"
                       >
                         Clear All
@@ -3762,8 +3981,7 @@ export default function App() {
                     onChange={(e) => {
                       const val = e.target.value;
                       if (val && !requirements.selectedAreas.includes(val)) {
-                        setRequirements({
-                          ...requirements,
+                        updateRequirementsFilter({
                           selectedAreas: [...requirements.selectedAreas, val],
                         });
                       }
@@ -3792,8 +4010,7 @@ export default function App() {
                           <span>{a}</span>
                           <button
                             onClick={() =>
-                              setRequirements({
-                                ...requirements,
+                              updateRequirementsFilter({
                                 selectedAreas: requirements.selectedAreas.filter(
                                   (item) => item !== a
                                 ),
@@ -3827,8 +4044,7 @@ export default function App() {
                           type="button"
                           onClick={() => {
                             if (!requirements.selectedAreas.includes(loc)) {
-                              setRequirements({
-                                ...requirements,
+                              updateRequirementsFilter({
                                 selectedAreas: [...requirements.selectedAreas, loc],
                               });
                             }
@@ -3861,8 +4077,7 @@ export default function App() {
                     step="500"
                     value={requirements.salaryBudgetCap}
                     onChange={(e) =>
-                      setRequirements({
-                        ...requirements,
+                      updateRequirementsFilter({
                         salaryBudgetCap: Number(e.target.value),
                       })
                     }
@@ -3889,8 +4104,7 @@ export default function App() {
                           key={preset.val}
                           type="button"
                           onClick={() =>
-                            setRequirements({
-                              ...requirements,
+                            updateRequirementsFilter({
                               salaryBudgetCap: preset.val,
                             })
                           }
@@ -3916,7 +4130,7 @@ export default function App() {
                     <select
                       value={requirements.tuitionType}
                       onChange={(e) =>
-                        setRequirements({ ...requirements, tuitionType: e.target.value })
+                        updateRequirementsFilter({ tuitionType: e.target.value })
                       }
                       className="w-full px-3 py-2 text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
@@ -3934,7 +4148,7 @@ export default function App() {
                     <select
                       value={requirements.preferredDays}
                       onChange={(e) =>
-                        setRequirements({ ...requirements, preferredDays: e.target.value })
+                        updateRequirementsFilter({ preferredDays: e.target.value })
                       }
                       className="w-full px-3 py-2 text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
@@ -4077,6 +4291,11 @@ export default function App() {
                                     }`}
                                   >
                                     {tutor.gender}
+                                  </span>
+                                )}
+                                {ensureArray(tutor.classes).length > 0 && (
+                                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-violet-50 text-violet-700 border border-violet-200">
+                                    Class: {ensureArray(tutor.classes).slice(0, 2).join(', ')}
                                   </span>
                                 )}
                                 {tutor.tuitionType && (
