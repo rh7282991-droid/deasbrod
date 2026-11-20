@@ -2778,11 +2778,9 @@ export default function App() {
 
   const updateRequirementsFilter = useCallback(
     (updater: Partial<RequirementsState> | ((prev: RequirementsState) => RequirementsState)) => {
-      setRequirements((prev) => {
-        const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
-        setAppliedRequirements(next);
-        return next;
-      });
+      setRequirements((prev) =>
+        typeof updater === 'function' ? updater(prev) : { ...prev, ...updater }
+      );
     },
     []
   );
