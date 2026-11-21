@@ -531,6 +531,10 @@ const parseTutorClassProfile = (classesList: unknown): TutorClassProfile => {
     .replace(/([a-z])(\d)/gi, '$1 $2')
     .replace(/(\d)([a-z])/gi, '$1 $2')
     .replace(/\b(primary\s*level|primary)\b/gi, '1')
+    .replace(/\b(class[\s\-]*xii|xii)\b/gi, '12')
+    .replace(/\b(class[\s\-]*xi|xi)\b/gi, '11')
+    .replace(/\b(twelve|twelfth)\b/gi, '12')
+    .replace(/\b(eleven|eleventh)\b/gi, '11')
     .replace(/\bten\b/gi, '10')
     .replace(/\bnine\b/gi, '9')
     .replace(/\beight\b/gi, '8')
@@ -541,26 +545,47 @@ const parseTutorClassProfile = (classesList: unknown): TutorClassProfile => {
     .replace(/\bthree\b/gi, '3')
     .replace(/\btwo\b/gi, '2')
     .replace(/\bone\b/gi, '1')
-    .replace(/\b(play\s*group|playgroup|play|pg|nursery|kg|kindergarten|pre[\s\-]*school)\b/gi, '1')
+    .replace(
+      /\b(play\s*group|playgroup|play|pg|nursery|nersury|kg|kindergarten|pre[\s\-]*school)\b/gi,
+      '1'
+    )
     .replace(/\bstd[\s\-]*v\b/gi, '5')
     .replace(/\b8th\s*grade\b/gi, '8');
+
+  // Convert "upto class X", "till class X", "under class X" -> "1-X"
+  normalized = normalized.replace(
+    /\b(?:upto|up\s*to|till|under)\s*(?:class[\s\-]*|std[\s\-]*|standard[\s\-]*)?(\d{1,2})\b/gi,
+    '1-$1'
+  );
+  // Convert "upper than class 7" / "above class 7" -> "8-12"
+  normalized = normalized.replace(
+    /\b(?:upper\s*than|above)\s*(?:class[\s\-]*|std[\s\-]*|standard[\s\-]*)?(\d{1,2})\b/gi,
+    (_, d) => `${Math.min(12, parseInt(d, 10) + 1)}-12`
+  );
 
   // Convert mixed range endpoints like "6 to HSC", "1 to A level", "5 to O level", "Upto O level"
   normalized = normalized
     .replace(
-      /\b(\d{1,2})\s*(?:[-–]|to)\s*(?:hsc|inter|intermediate|a\s*['’\-]?\s*levels?|a2\s*level|as\b)/gi,
+      /\b(\d{1,2})\s*(?:[-–—]|to|theke|থেকে)\s*(?:hsc|hcs|inter|intermediate|enter|a\s*['’\-]?\s*levels?|a2\s*level|as\b)/gi,
       '$1-12'
     )
-    .replace(/\b(\d{1,2})\s*(?:[-–]|to)\s*(?:ssc|o\s*['’\-]?\s*levels?)/gi, '$1-10')
-    .replace(/\bupto\s*o\s*['’\-]?\s*levels?/gi, '1-10');
+    .replace(
+      /\b(\d{1,2})\s*(?:[-–—]|to|theke|থেকে)\s*(?:ssc|o\s*['’\-]?\s*levels?|pre[\s\-]*o\s*['’\-]?\s*levels?)/gi,
+      '$1-10'
+    )
+    .replace(/\b(?:upto|till)\s*(?:pre[\s\-]*)?o\s*['’\-]?\s*levels?/gi, '1-10');
 
   const hasHsc1st = /\b(hsc\s*1st|inter\s*1st|1st\s*year)\b/i.test(normalized);
-  const hasHsc2nd = /\b(hsc\s*2nd|inter\s*2nd|2nd\s*year)\b/i.test(normalized);
+  const hasHsc2nd = /\b(hsc\s*2nd|inter\s*2nd|2nd\s*year|second\s*year)\b/i.test(normalized);
   if (hasHsc1st) grades.add(11);
   if (hasHsc2nd) grades.add(12);
 
-  // General HSC / Intermediate
-  if (!hasHsc1st && !hasHsc2nd && /\b(hsc|hcs|inter|intermediate)\b/i.test(raw)) {
+  // General HSC / Intermediate ("enter", "intermediat", "hsc")
+  if (
+    !hasHsc1st &&
+    !hasHsc2nd &&
+    /\b(hsc|hcs|inter|intermediate|intermediat|enter)\b/i.test(raw)
+  ) {
     grades.add(11);
     grades.add(12);
   }
@@ -571,9 +596,9 @@ const parseTutorClassProfile = (classesList: unknown): TutorClassProfile => {
     grades.add(10);
   }
 
-  // Ranges like "1-5", "5 to 10", "1 to12", "03 to 12"
+  // Ranges like "1-5", "1—10", "3 theke 12", "5 to 10", "1 to12", "03 to 12"
   const rangeRegex =
-    /\b(\d{1,2})\s*(?:[-–/]|to)\s*(?:class[\s\-]*|std[\s\-]*|standard[\s\-]*)?(\d{1,2})\b/gi;
+    /\b(\d{1,2})\s*(?:[-–—/]|to|theke|থেকে)\s*(?:class[\s\-]*|cls[\s\-]*|std[\s\-]*|standard[\s\-]*)?(\d{1,2})\b/gi;
   let match: RegExpExecArray | null;
   while ((match = rangeRegex.exec(normalized)) !== null) {
     let start = parseInt(match[1], 10);
@@ -742,7 +767,7 @@ const parseTutorTuitionTypes = (rawType: unknown, rawBio: unknown): Set<string> 
   return types;
 };
 
-// Parse Tutor Education Background / Medium ("Select Your Education Background": Bangla Version, English Version, English Medium, Madrasa Medium)
+// Parse Tutor Education Background / Medium ("Select Your Education Background" / "Your Academic Level": Bangla Medium, English Version, O/A Level)
 const parseTutorEducationBackground = (
   rawEduBg: unknown,
   rawClasses: unknown,
@@ -771,7 +796,7 @@ const parseTutorEducationBackground = (
     ) || /^bangla$/i.test(eduStr);
 
   const hasExplicitEnglishVersion =
-    /\b(english\s*version|eng\s*version|e\.?\s*v\.?\b|ইংলিশ\s*ভার্সন|ইংরেজি\s*ভার্সন|english\s+bangla\s+version|bangla\s*(?:&|and)\s*english\s*version)/i.test(
+    /\b(english\s*version|enlish\s*version|eng\s*version|e\.?\s*v\.?\b|ইংলিশ\s*ভার্সন|ইংরেজি\s*ভার্সন|english\s+bangla\s+version|bangla\s*(?:&|and)\s*english\s*version)/i.test(
       combined
     );
 
@@ -784,12 +809,6 @@ const parseTutorEducationBackground = (
     /\b(madrasa|madrasah|dakhil|alim|fazil|kamil|মাদ্রাসা|দাখিল|আলিম|ফাজিল|কামিল|আলিয়া|কওমি)/i.test(
       `${combined} ${uniDeptStr.toLowerCase()}`
     );
-
-  const labels: string[] = [];
-  if (hasExplicitBangla) labels.push('Bangla Version');
-  if (hasExplicitEnglishVersion) labels.push('English Version');
-  if (hasExplicitEnglishMedium) labels.push('English Medium');
-  if (hasExplicitMadrasa) labels.push('Madrasa Medium');
 
   // Check if tutor is exclusively O/A Level (English Medium) with no regular Bangla/NCTB classes
   const classProfile = parseTutorClassProfile(rawClasses);
@@ -806,11 +825,23 @@ const parseTutorEducationBackground = (
     eduStr.toLowerCase() !== 'not specified' &&
     eduStr.toLowerCase() !== 'not provided'
   ) {
-    displayLabel = labels.length > 0 ? labels.join(', ') : eduStr;
-  } else if (labels.length > 0) {
-    displayLabel = labels.join(', ');
+    // Normalize exact value from CSV / Supabase ("Enlish Version" -> "English Version", "Bangla Medium", "O/A Level")
+    const eduLower = eduStr.toLowerCase();
+    if (eduLower.includes('enlish version') || eduLower.includes('english version')) {
+      displayLabel = 'English Version';
+    } else if (eduLower.includes('o/a level') || eduLower.includes('english medium')) {
+      displayLabel = 'O/A Level (English Medium)';
+    } else if (eduLower.includes('bangla medium')) {
+      displayLabel = 'Bangla Medium';
+    } else if (eduLower.includes('bangla version')) {
+      displayLabel = 'Bangla Version';
+    } else if (eduLower.includes('madrasa')) {
+      displayLabel = 'Madrasa Medium';
+    } else {
+      displayLabel = eduStr;
+    }
   } else {
-    displayLabel = 'Bangla Version';
+    displayLabel = '';
   }
 
   return {
@@ -841,30 +872,27 @@ const getTutorEducationMediumMatch = (
   if (selectedMedium === 'English Version') {
     return {
       matches: info.hasExplicitEnglishVersion,
-      bonus: info.hasExplicitEnglishVersion ? 16 : 0,
+      bonus: info.hasExplicitEnglishVersion ? 18 : 0,
     };
   }
-  if (selectedMedium === 'English Medium') {
+  if (selectedMedium === 'English Medium' || selectedMedium === 'O/A Level') {
     return {
       matches: info.hasExplicitEnglishMedium,
-      bonus: info.hasExplicitEnglishMedium ? 16 : 0,
+      bonus: info.hasExplicitEnglishMedium ? 18 : 0,
     };
   }
   if (selectedMedium === 'Madrasa Medium') {
     return {
       matches: info.hasExplicitMadrasa,
-      bonus: info.hasExplicitMadrasa ? 16 : 0,
+      bonus: info.hasExplicitMadrasa ? 18 : 0,
     };
   }
-  if (selectedMedium === 'Bangla Version') {
-    if (info.hasExplicitBangla) {
-      return { matches: true, bonus: 16 };
-    }
-    // Tutors who teach standard NCTB classes (1-12/SSC/HSC) and are not exclusively English-Medium-only also teach Bangla Version/Medium
-    if (!info.isExclusivelyEnglishMedium) {
-      return { matches: true, bonus: 6 };
-    }
-    return { matches: false, bonus: 0 };
+  if (selectedMedium === 'Bangla Version' || selectedMedium === 'Bangla Medium') {
+    // Only match tutors who actually have Bangla Medium / Bangla Version in their record or classes
+    return {
+      matches: info.hasExplicitBangla,
+      bonus: info.hasExplicitBangla ? 18 : 0,
+    };
   }
 
   // Custom medium string fallback
@@ -2192,6 +2220,8 @@ export default function App() {
     const eduBgIdx = findCol([
       (h) =>
         h.includes('select your education') ||
+        h.includes('your academic level') ||
+        h === 'academic level' ||
         h.includes('education background') ||
         h.includes('educational background') ||
         h.includes('medium') ||
@@ -2650,6 +2680,7 @@ export default function App() {
               presentAddress: st.presentAddress,
               university: st.university,
               department: st.department,
+              school: st.educationBackground || null,
               preferredAreas: st.preferredAreas,
               subjects: st.subjects,
               classes: st.classes,
@@ -2663,6 +2694,16 @@ export default function App() {
               .replace(/\[SALARY_RANGE:[^\]]+\]\s*•?\s*/g, '')
               .replace(/\[EDU_BG:[^\]]+\]\s*•?\s*/g, '')
               .trim();
+            const nextEduBg = st.educationBackground || exNorm.educationBackground || '';
+            const nextBio =
+              !st.educationBackground && exNorm.educationBackground
+                ? [
+                    `[EDU_BG:${exNorm.educationBackground}]`,
+                    st.bio.replace(/\[EDU_BG:[^\]]+\]\s*•?\s*/g, '').trim(),
+                  ]
+                    .filter(Boolean)
+                    .join(' • ')
+                : st.bio;
             const changed =
               exNorm.name !== st.name ||
               exNorm.gender !== st.gender ||
@@ -2670,7 +2711,7 @@ export default function App() {
               exNorm.department !== st.department ||
               exNorm.presentAddress !== st.presentAddress ||
               exNorm.salaryRange !== st.salaryRange ||
-              exNorm.educationBackground !== st.educationBackground ||
+              (st.educationBackground && exNorm.educationBackground !== st.educationBackground) ||
               JSON.stringify(exNorm.classes) !== JSON.stringify(st.classes) ||
               JSON.stringify(exNorm.preferredAreas) !== JSON.stringify(st.preferredAreas) ||
               JSON.stringify(exNorm.subjects) !== JSON.stringify(st.subjects) ||
@@ -2685,11 +2726,12 @@ export default function App() {
                   presentAddress: st.presentAddress,
                   university: st.university,
                   department: st.department,
+                  school: nextEduBg || null,
                   preferredAreas: st.preferredAreas,
                   subjects: st.subjects,
                   classes: st.classes,
                   expectedSalary: st.expectedSalary,
-                  bio: st.bio,
+                  bio: nextBio,
                 },
               });
             }
@@ -3080,6 +3122,7 @@ export default function App() {
       presentAddress: cleanAddressText(newTutorForm.presentAddress) || 'Not Specified',
       university: newTutorForm.university.trim() || 'Not Specified',
       department: newTutorForm.department.trim() || 'Not Specified',
+      school: chosenEduBg || null,
       preferredAreas: cleanAreasList(newTutorForm.preferredAreas),
       subjects: ensureArray(newTutorForm.subjects),
       classes: normalizeClassString(newTutorForm.classes),
@@ -3188,6 +3231,7 @@ export default function App() {
           presentAddress: t.presentAddress,
           university: t.university,
           department: t.department,
+          school: t.educationBackground || null,
           preferredAreas: t.preferredAreas,
           subjects: t.subjects,
           classes: t.classes,
@@ -3293,10 +3337,55 @@ export default function App() {
         }
 
         if (activeFilter.selectedSubjects.length > 0) {
-          const tSub = `${(t.subjects || []).join(' ')} ${t.department}`.toLowerCase();
+          const tSub = `${(t.subjects || []).join(' ')} ${(t.classes || []).join(' ')} ${
+            t.department || ''
+          } ${t.bio || ''}`.toLowerCase();
           const hasAny = activeFilter.selectedSubjects.some((s) => {
-            const cleanSub = s.toLowerCase().replace(/\(.*?\)/g, '').trim();
-            return tSub.includes(cleanSub) || (cleanSub.includes('math') && tSub.includes('math'));
+            const sLower = s.toLowerCase().trim();
+            if (sLower.startsWith('all subjects')) {
+              return /\b(all|সব)\b/i.test(tSub) || (t.subjects || []).length >= 3;
+            }
+            const cleanSub = sLower.replace(/\(.*?\)/g, '').trim();
+            if (tSub.includes(cleanSub)) return true;
+            if (cleanSub === 'general math' || cleanSub === 'math') {
+              return /\b(math|maths|mathematics|g\.?\s*math|গণিত)\b/i.test(tSub);
+            }
+            if (cleanSub === 'higher math') {
+              return /\b(higher\s*math|h\.?\s*math|h-math|mathematics|উচ্চতর\s*গণিত)\b/i.test(
+                tSub
+              );
+            }
+            if (cleanSub === 'physics') {
+              return /\b(physics|phy|physic|পদার্থ)\b/i.test(tSub);
+            }
+            if (cleanSub === 'chemistry') {
+              return /\b(chemistry|chem|chamistry|chemistr|che|রসায়ন)\b/i.test(tSub);
+            }
+            if (cleanSub === 'biology') {
+              return /\b(biology|bio|biolog|botany|zoology|জীববিজ্ঞান)\b/i.test(tSub);
+            }
+            if (cleanSub === 'english') {
+              return /\b(english|eng|englis|ইংরেজি)\b/i.test(tSub);
+            }
+            if (cleanSub === 'bangla') {
+              return /\b(bangla|bengali|bangl|বাংলা)\b/i.test(tSub);
+            }
+            if (cleanSub === 'accounting') {
+              return /\b(accounting|acc|accountin|accunting|accoutinh|হিসাববিজ্ঞান)\b/i.test(tSub);
+            }
+            if (cleanSub === 'finance') {
+              return /\b(finance|fin|financ|financce|fiance|ফিন্যান্স)\b/i.test(tSub);
+            }
+            if (cleanSub === 'economics') {
+              return /\b(economics|economic|econ|অর্থনীতি)\b/i.test(tSub);
+            }
+            if (cleanSub === 'science') {
+              return /\b(science|general\s*science|g\.?\s*science|sci|বিজ্ঞান)\b/i.test(tSub);
+            }
+            if (cleanSub === 'ict') {
+              return /\b(ict|computer|cse|আইসিটি)\b/i.test(tSub);
+            }
+            return false;
           });
           if (!hasAny) return false;
         }
@@ -3375,7 +3464,8 @@ export default function App() {
           if (targetDayMatch) {
             const targetDay = parseInt(targetDayMatch[1], 10);
             const tutorDays = parseTutorPreferredDays(t.preferredDays, t.bio);
-            if (!tutorDays.has(targetDay)) {
+            // If tutor explicitly specified days, require targetDay; if Negotiable (empty set), allow them
+            if (tutorDays.size > 0 && !tutorDays.has(targetDay)) {
               return false;
             }
           }
@@ -6214,8 +6304,14 @@ export default function App() {
                   <p className="text-[10px] text-slate-400 font-bold uppercase">
                     Education Background (Medium / Version)
                   </p>
-                  <p className="font-bold text-amber-800 mt-1 text-sm">
-                    {selectedTutorForProfile.educationBackground || 'Bangla Version'}
+                  <p
+                    className={`font-bold mt-1 text-sm ${
+                      selectedTutorForProfile.educationBackground
+                        ? 'text-amber-800'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {selectedTutorForProfile.educationBackground || 'Not Specified'}
                   </p>
                 </div>
               </div>
