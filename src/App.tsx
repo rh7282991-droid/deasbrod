@@ -50,6 +50,7 @@ interface Tutor {
   salaryRange: string;
   tuitionType: string;
   preferredDays: string;
+  educationBackground: string;
   bio: string;
   matchScore?: number;
 }
@@ -60,10 +61,17 @@ interface TuitionRequest {
   studentName: string;
   guardianName: string;
   className: string;
+  educationMedium?: string;
   location: string;
+  areas: string[];
   preferredVarsity: string;
+  preferredDepartment: string;
+  preferredGender: string;
+  tuitionType: string;
+  preferredDays: string;
   schedule: string;
   salary: string;
+  salaryBudgetCap: number;
   contact: string;
   notes: string;
   subjects: string[];
@@ -87,6 +95,7 @@ interface RequirementsState {
   guardianName: string;
   batchCode: string;
   selectedClass: string;
+  selectedEducationMedium: string;
   selectedSubjects: string[];
   preferredGender: string;
   selectedUniversity: string;
@@ -292,9 +301,31 @@ const formatBdPhoneNumbers = (rawPhone: unknown) => {
   if (rawPhone === null || rawPhone === undefined) {
     return { localWithZero: '', wasenderFormat: '', isValid: false };
   }
-  let str = String(rawPhone).trim();
+  const banglaMap: Record<string, string> = {
+    '০': '0',
+    '১': '1',
+    '২': '2',
+    '৩': '3',
+    '৪': '4',
+    '৫': '5',
+    '৬': '6',
+    '৭': '7',
+    '৮': '8',
+    '৯': '9',
+  };
+  let str = String(rawPhone)
+    .replace(/[০-৯]/g, (d) => banglaMap[d] || d)
+    .trim();
+
+  if (/^\d+(\.\d+)?e\+\d+$/i.test(str)) {
+    const num = Number(str);
+    if (!isNaN(num)) str = Math.round(num).toString();
+  }
   if (str.endsWith('.0')) str = str.slice(0, -2);
-  let digits = str.replace(/\D/g, '');
+
+  // Extract first valid BD mobile number if cell contains multiple numbers or separators
+  const bdMatch = str.replace(/[\s\-()]/g, '').match(/(?:88)?(0?1[3-9]\d{8})/);
+  let digits = bdMatch ? bdMatch[1] : str.replace(/\D/g, '');
   if (!digits) {
     return { localWithZero: '', wasenderFormat: '', isValid: false };
   }
@@ -496,7 +527,10 @@ const parseTutorClassProfile = (classesList: unknown): TutorClassProfile => {
     for (let g = 1; g <= 12; g++) grades.add(g);
   }
 
-  let normalized = raw
+  let normalized = convertBanglaDigitsToEnglish(raw)
+    .replace(/([a-z])(\d)/gi, '$1 $2')
+    .replace(/(\d)([a-z])/gi, '$1 $2')
+    .replace(/\b(primary\s*level|primary)\b/gi, '1')
     .replace(/\bten\b/gi, '10')
     .replace(/\bnine\b/gi, '9')
     .replace(/\beight\b/gi, '8')
@@ -706,6 +740,140 @@ const parseTutorTuitionTypes = (rawType: unknown, rawBio: unknown): Set<string> 
     types.add('Home Tuition');
   }
   return types;
+};
+
+// Parse Tutor Education Background / Medium ("Select Your Education Background": Bangla Version, English Version, English Medium, Madrasa Medium)
+const parseTutorEducationBackground = (
+  rawEduBg: unknown,
+  rawClasses: unknown,
+  rawBio: unknown,
+  rawUni?: unknown,
+  rawDept?: unknown
+): {
+  displayLabel: string;
+  hasExplicitBangla: boolean;
+  hasExplicitEnglishVersion: boolean;
+  hasExplicitEnglishMedium: boolean;
+  hasExplicitMadrasa: boolean;
+  isExclusivelyEnglishMedium: boolean;
+} => {
+  const eduStr = String(rawEduBg || '').trim();
+  const classesStr = Array.isArray(rawClasses)
+    ? rawClasses.join(' , ')
+    : String(rawClasses || '');
+  const bioStr = String(rawBio || '');
+  const uniDeptStr = `${String(rawUni || '')} ${String(rawDept || '')}`;
+  const combined = `${eduStr} ${classesStr} ${bioStr}`.toLowerCase();
+
+  const hasExplicitBangla =
+    /\b(bangla\s*medium|bangla\s*version|bengali\s*medium|bengali\s*version|বাংলা\s*মিডিয়াম|বাংলা\s*মিডিয়াম|বাংলা\s*ভার্সন|bm\b|bv\b)/i.test(
+      combined
+    ) || /^bangla$/i.test(eduStr);
+
+  const hasExplicitEnglishVersion =
+    /\b(english\s*version|eng\s*version|e\.?\s*v\.?\b|ইংলিশ\s*ভার্সন|ইংরেজি\s*ভার্সন|english\s+bangla\s+version|bangla\s*(?:&|and)\s*english\s*version)/i.test(
+      combined
+    );
+
+  const hasExplicitEnglishMedium =
+    /\b(english\s*medium|eng\s*medium|e\.?\s*m\.?\b|ইংলিশ\s*মিডিয়াম|ইংলিশ\s*মিডিয়াম|ইংরেজি\s*মিডিয়াম|o\s*['’\-/]?\s*levels?|a\s*['’\-/]?\s*levels?|o\/a|0\s*levels?|a2\s*levels?|edexcel|cambridge|pre[\s\-]*o|standard\s*[1-9]|std[\s\-]*[1-9v])/i.test(
+      combined
+    );
+
+  const hasExplicitMadrasa =
+    /\b(madrasa|madrasah|dakhil|alim|fazil|kamil|মাদ্রাসা|দাখিল|আলিম|ফাজিল|কামিল|আলিয়া|কওমি)/i.test(
+      `${combined} ${uniDeptStr.toLowerCase()}`
+    );
+
+  const labels: string[] = [];
+  if (hasExplicitBangla) labels.push('Bangla Version');
+  if (hasExplicitEnglishVersion) labels.push('English Version');
+  if (hasExplicitEnglishMedium) labels.push('English Medium');
+  if (hasExplicitMadrasa) labels.push('Madrasa Medium');
+
+  // Check if tutor is exclusively O/A Level (English Medium) with no regular Bangla/NCTB classes
+  const classProfile = parseTutorClassProfile(rawClasses);
+  const isExclusivelyEnglishMedium =
+    hasExplicitEnglishMedium &&
+    !hasExplicitBangla &&
+    !hasExplicitEnglishVersion &&
+    classProfile.grades.size === 0;
+
+  let displayLabel = '';
+  if (
+    eduStr &&
+    eduStr.toLowerCase() !== 'nan' &&
+    eduStr.toLowerCase() !== 'not specified' &&
+    eduStr.toLowerCase() !== 'not provided'
+  ) {
+    displayLabel = labels.length > 0 ? labels.join(', ') : eduStr;
+  } else if (labels.length > 0) {
+    displayLabel = labels.join(', ');
+  } else {
+    displayLabel = 'Bangla Version';
+  }
+
+  return {
+    displayLabel,
+    hasExplicitBangla,
+    hasExplicitEnglishVersion,
+    hasExplicitEnglishMedium,
+    hasExplicitMadrasa,
+    isExclusivelyEnglishMedium,
+  };
+};
+
+const getTutorEducationMediumMatch = (
+  tutor: Tutor,
+  selectedMedium: string
+): { matches: boolean; bonus: number } => {
+  if (!selectedMedium || selectedMedium === 'Any' || selectedMedium === 'All Mediums') {
+    return { matches: true, bonus: 0 };
+  }
+  const info = parseTutorEducationBackground(
+    tutor.educationBackground,
+    tutor.classes,
+    tutor.bio,
+    tutor.university,
+    tutor.department
+  );
+
+  if (selectedMedium === 'English Version') {
+    return {
+      matches: info.hasExplicitEnglishVersion,
+      bonus: info.hasExplicitEnglishVersion ? 16 : 0,
+    };
+  }
+  if (selectedMedium === 'English Medium') {
+    return {
+      matches: info.hasExplicitEnglishMedium,
+      bonus: info.hasExplicitEnglishMedium ? 16 : 0,
+    };
+  }
+  if (selectedMedium === 'Madrasa Medium') {
+    return {
+      matches: info.hasExplicitMadrasa,
+      bonus: info.hasExplicitMadrasa ? 16 : 0,
+    };
+  }
+  if (selectedMedium === 'Bangla Version') {
+    if (info.hasExplicitBangla) {
+      return { matches: true, bonus: 16 };
+    }
+    // Tutors who teach standard NCTB classes (1-12/SSC/HSC) and are not exclusively English-Medium-only also teach Bangla Version/Medium
+    if (!info.isExclusivelyEnglishMedium) {
+      return { matches: true, bonus: 6 };
+    }
+    return { matches: false, bonus: 0 };
+  }
+
+  // Custom medium string fallback
+  const target = selectedMedium.toLowerCase().trim();
+  const hay = `${tutor.educationBackground || ''} ${(tutor.classes || []).join(' ')} ${
+    tutor.bio || ''
+  }`.toLowerCase();
+  const matches = hay.includes(target);
+  return { matches, bonus: matches ? 12 : 0 };
 };
 
 // Extract explicit Preferred Days per week from Tutor's availability/preferredDays field & bio
@@ -1681,6 +1849,7 @@ export default function App() {
     guardianName: 'Mr. Hasan',
     batchCode: 'AT9832',
     selectedClass: 'All Classes',
+    selectedEducationMedium: 'Any',
     selectedSubjects: [],
     preferredGender: 'Any',
     selectedUniversity: 'All Universities',
@@ -1694,6 +1863,7 @@ export default function App() {
   const [appliedRequirements, setAppliedRequirements] = useState<RequirementsState>(
     defaultRequirementsState
   );
+  const [manualLocationQuery, setManualLocationQuery] = useState('');
 
   // Modals State
   const [selectedTutorForProfile, setSelectedTutorForProfile] = useState<Tutor | null>(null);
@@ -1715,6 +1885,7 @@ export default function App() {
     phone: '',
     presentAddress: '',
     university: '',
+    educationBackground: 'Bangla Version',
     department: '',
     preferredAreas: [] as string[],
     subjects: [] as string[],
@@ -1736,10 +1907,18 @@ export default function App() {
     studentName: '',
     guardianName: '',
     className: 'Class 9',
-    location: '',
+    educationMedium: 'Any',
+    subjects: [] as string[],
+    preferredGender: 'Any',
     preferredVarsity: 'All Universities',
-    schedule: '4 Days/Week (Any)',
+    preferredDepartment: 'All Departments',
+    areas: [] as string[],
+    location: '',
+    salaryBudgetCap: 25000,
     salary: 'Negotiable',
+    tuitionType: 'Home Tuition',
+    preferredDays: '4 Days/Week',
+    schedule: '4 Days/Week (Any)',
     contact: '',
     notes: '',
   };
@@ -1747,6 +1926,15 @@ export default function App() {
 
   const [paymentRecords, setPaymentRecords] = useState<PaymentRecord[]>([]);
   const [ledgerFilter, setLedgerFilter] = useState('all');
+  const [ledgerDateMode, setLedgerDateMode] = useState<'all' | 'date' | 'month' | 'range'>('all');
+  const [ledgerSelectedDate, setLedgerSelectedDate] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [ledgerSelectedMonth, setLedgerSelectedMonth] = useState(() =>
+    new Date().toISOString().slice(0, 7)
+  );
+  const [ledgerStartDate, setLedgerStartDate] = useState('');
+  const [ledgerEndDate, setLedgerEndDate] = useState('');
   const [addPaymentModalOpen, setAddPaymentModalOpen] = useState(false);
   const initialPaymentForm = {
     tuitionCode: 'AT9832',
@@ -1782,6 +1970,13 @@ export default function App() {
     let extractedPreferredDays = String(
       row.preferredDays || row.preferred_days || row.availability || ''
     ).trim();
+    let extractedEduBg = String(
+      row.educationBackground ||
+        row.education_background ||
+        row.medium ||
+        row.school ||
+        ''
+    ).trim();
 
     const rangeMatch = rawBio.match(/\[SALARY_RANGE:([^\]]+)\]/);
     if (rangeMatch) {
@@ -1799,6 +1994,12 @@ export default function App() {
     if (daysMatch) {
       extractedPreferredDays = daysMatch[1].trim();
       rawBio = rawBio.replace(/\[PREFERRED_DAYS:[^\]]+\]\s*•?\s*/g, '').trim();
+    }
+
+    const eduMatch = rawBio.match(/\[EDU_BG:([^\]]+)\]/);
+    if (eduMatch) {
+      if (!extractedEduBg) extractedEduBg = eduMatch[1].trim();
+      rawBio = rawBio.replace(/\[EDU_BG:[^\]]+\]\s*•?\s*/g, '').trim();
     }
 
     let extractedClassesFromBio: string[] = [];
@@ -1862,6 +2063,14 @@ export default function App() {
       rawBio
     );
 
+    const eduProfile = parseTutorEducationBackground(
+      extractedEduBg,
+      finalClasses,
+      rawBio,
+      row.university,
+      row.department
+    );
+
     return {
       id: (row.id as number | string) ?? Date.now() + Math.random(),
       name: cleanedName,
@@ -1883,20 +2092,22 @@ export default function App() {
       salaryRange: finalSalaryRange,
       tuitionType: finalTuitionType,
       preferredDays: finalPreferredDays,
+      educationBackground: eduProfile.displayLabel,
       bio: rawBio,
     };
   }, []);
 
   // Parse CSV Text into Array of Rows
   const parseCsvTextToMatrix = (csvText: string): string[][] => {
+    const cleanText = csvText.replace(/^\uFEFF/, '');
     const rows: string[][] = [];
     let currentRow: string[] = [];
     let currentCell = '';
     let inQuotes = false;
 
-    for (let i = 0; i < csvText.length; i++) {
-      const ch = csvText[i];
-      const nextCh = csvText[i + 1];
+    for (let i = 0; i < cleanText.length; i++) {
+      const ch = cleanText[i];
+      const nextCh = cleanText[i + 1];
 
       if (ch === '"') {
         if (inQuotes && nextCh === '"') {
@@ -1928,7 +2139,12 @@ export default function App() {
   // Convert CSV Matrix to Tutor Objects
   const parseMatrixToTutors = useCallback((matrix: string[][]): Tutor[] => {
     if (!matrix || matrix.length < 2) return [];
-    const headers = matrix[0].map((h) => String(h || '').toLowerCase().trim());
+    const headers = matrix[0].map((h) =>
+      String(h || '')
+        .replace(/^\uFEFF/, '')
+        .toLowerCase()
+        .trim()
+    );
 
     const findCol = (predicates: Array<(h: string) => boolean>) => {
       for (const pred of predicates) {
@@ -1939,53 +2155,111 @@ export default function App() {
     };
 
     const nameIdx = findCol([
-      (h) => h === 'full name' || h === 'name' || h === 'teacher name',
+      (h) =>
+        h === 'full name' ||
+        h === 'name' ||
+        h === 'teacher name' ||
+        h === 'tutor name' ||
+        h.includes('আপনার নাম'),
       (h) =>
         h.includes('name') &&
         !h.includes('university') &&
         !h.includes('college') &&
-        !h.includes('school'),
+        !h.includes('school') &&
+        !h.includes('department') &&
+        !h.includes('subject'),
     ]);
     const phoneIdx = findCol([
       (h) =>
         h.includes('phone number') ||
         h === 'current number' ||
         h === 'phone' ||
-        h === 'mobile',
-      (h) => h.includes('contact') || h.includes('number'),
+        h === 'mobile' ||
+        h === 'contact' ||
+        h.includes('মোবাইল') ||
+        h.includes('ফোন'),
+      (h) => (h.includes('contact') || h.includes('number')) && !h.includes('whatsapp'),
     ]);
-    const waIdx = findCol([(h) => h.includes('whatsapp')]);
-    const uniIdx = findCol([(h) => h.includes('university'), (h) => h === 'university / college']);
-    const deptIdx = findCol([(h) => h.includes('department')]);
+    const waIdx = findCol([(h) => h.includes('whatsapp') || h.includes('হোয়াটসঅ্যাপ')]);
+    const uniIdx = findCol([
+      (h) =>
+        h.includes('university') ||
+        h === 'university / college' ||
+        h.includes('institution') ||
+        h.includes('varsity') ||
+        h.includes('বিশ্ববিদ্যালয়'),
+    ]);
+    const eduBgIdx = findCol([
+      (h) =>
+        h.includes('select your education') ||
+        h.includes('education background') ||
+        h.includes('educational background') ||
+        h.includes('medium') ||
+        h.includes('version') ||
+        h.includes('curriculum') ||
+        h.includes('মিডিয়াম') ||
+        h.includes('ভার্সন'),
+    ]);
+    const deptIdx = findCol([
+      (h) =>
+        h.includes('department') ||
+        h === 'dept' ||
+        h.includes('subject/dept') ||
+        h.includes('বিভাগ'),
+    ]);
     const prefLocIdx = findCol([
       (h) =>
         h.includes('tuition location') ||
         h.includes('preferred location') ||
+        h.includes('preferred area') ||
+        h.includes('preferredareas') ||
+        h.includes('preferred_areas') ||
+        h.includes('kon kon area') ||
         h.includes('কোন কোন এলাকায়'),
-      (h) => h.includes('location') && !h.includes('self') && !h.includes('current'),
+      (h) =>
+        (h.includes('location') || h.includes('area')) &&
+        !h.includes('self') &&
+        !h.includes('current') &&
+        !h.includes('present'),
     ]);
     const selfLocIdx = findCol([
       (h) =>
         h.includes('self location') ||
         h.includes('current location') ||
         h.includes('present location') ||
-        h.includes('present address'),
+        h.includes('present address') ||
+        h.includes('presentaddress') ||
+        h.includes('present_address') ||
+        h.includes('বর্তমান ঠিকানা'),
     ]);
     const subjIdx = findCol([
       (h) =>
         h.includes('favourite subject') ||
         h.includes('favorite subject') ||
-        h.includes('subjects'),
+        h.includes('preferred subject') ||
+        h.includes('subjects') ||
+        h === 'subject',
     ]);
-    const genderIdx = findCol([(h) => h.includes('gender')]);
-    const classIdx = findCol([(h) => h.includes('class level') || h.includes('class')]);
-    const salaryIdx = findCol([(h) => h.includes('salary')]);
-    const tuitionTypeIdx = findCol([(h) => h.includes('tuition type') || h.includes('type')]);
+    const genderIdx = findCol([(h) => h.includes('gender') || h.includes('লিঙ্গ')]);
+    const classIdx = findCol([
+      (h) =>
+        h.includes('class level') ||
+        h === 'classes' ||
+        h === 'class' ||
+        h.includes('preferred class') ||
+        h.includes('কোন ক্লাস'),
+    ]);
+    const salaryIdx = findCol([
+      (h) => h.includes('salary') || h.includes('expected_salary') || h.includes('বেতন'),
+    ]);
+    const tuitionTypeIdx = findCol([(h) => h.includes('tuition type') || h === 'type']);
     const daysIdx = findCol([
       (h) => h.includes('preferred days') || h.includes('days') || h.includes('availability'),
     ]);
     const notesIdx = findCol([(h) => h.includes('rules') || h.includes('notes')]);
-    const banglaNoteIdx = findCol([(h) => h.includes('আপনার কিছু বলার থাকলে') || h === 'bio']);
+    const banglaNoteIdx = findCol([
+      (h) => h.includes('আপনার কিছু বলার থাকলে') || h === 'bio' || h.includes('comment'),
+    ]);
 
     const getCell = (row: string[], idx: number) =>
       idx >= 0 && idx < row.length ? String(row[idx] || '').trim() : '';
@@ -1994,23 +2268,58 @@ export default function App() {
     for (let r = 1; r < matrix.length; r++) {
       const row = matrix[r];
       const rawName = getCell(row, nameIdx);
-      const rawPhone = getCell(row, phoneIdx) || getCell(row, waIdx);
-      const phoneFormatted = formatBdPhoneNumbers(rawPhone);
+      const primaryPhoneCandidate = formatBdPhoneNumbers(getCell(row, phoneIdx));
+      const waPhoneCandidate = formatBdPhoneNumbers(getCell(row, waIdx));
+
+      // Prefer a valid 11-digit BD mobile number from either phone or whatsapp column
+      let phoneFormatted = primaryPhoneCandidate.isValid
+        ? primaryPhoneCandidate
+        : waPhoneCandidate.isValid
+        ? waPhoneCandidate
+        : primaryPhoneCandidate.localWithZero
+        ? primaryPhoneCandidate
+        : waPhoneCandidate;
+
+      // Fallback scan across the row if neither phone column yielded a valid BD number
+      if (!phoneFormatted.isValid) {
+        for (let c = 0; c < row.length; c++) {
+          const candidate = formatBdPhoneNumbers(getCell(row, c));
+          if (candidate.isValid) {
+            phoneFormatted = candidate;
+            break;
+          }
+        }
+      }
 
       if (!rawName || !phoneFormatted.localWithZero) continue;
 
-      const waFormatted = formatBdPhoneNumbers(getCell(row, waIdx) || rawPhone);
+      const waFormatted = waPhoneCandidate.isValid ? waPhoneCandidate : phoneFormatted;
       const uniVal = getCell(row, uniIdx) || 'Not Specified';
+      const rawEduBgVal = getCell(row, eduBgIdx);
       const deptVal = getCell(row, deptIdx) || 'Not Specified';
       const rawGender = getCell(row, genderIdx).toLowerCase();
-      const genderVal = rawGender.includes('female')
-        ? 'Female'
-        : rawGender.includes('male')
-        ? 'Male'
-        : 'Any';
+      const genderVal =
+        rawGender.includes('female') ||
+        rawGender === 'f' ||
+        rawGender.includes('নারী') ||
+        rawGender.includes('মহিলা')
+          ? 'Female'
+          : rawGender.includes('male') || rawGender === 'm' || rawGender.includes('পুরুষ')
+          ? 'Male'
+          : 'Any';
       const areasVal = cleanAreasList(getCell(row, prefLocIdx));
-      const selfLocVal = cleanAddressText(getCell(row, selfLocIdx)) || areasVal[0] || 'Not Specified';
-      const classesVal = normalizeClassString(getCell(row, classIdx));
+      const selfLocVal =
+        cleanAddressText(getCell(row, selfLocIdx)) || areasVal[0] || 'Not Specified';
+      const rawClassCell = getCell(row, classIdx);
+      const rawSubjCell = getCell(row, subjIdx);
+      let classesVal = normalizeClassString(rawClassCell);
+      if (
+        classesVal.length === 0 &&
+        /\b(class|cls|ssc|hsc|level|\d\s*[-–to]+\s*\d)/i.test(rawSubjCell)
+      ) {
+        classesVal = normalizeClassString(rawSubjCell);
+      }
+
       const rawSalStr = getCell(row, salaryIdx).trim();
       const cleanSalRange =
         rawSalStr && rawSalStr.toLowerCase() !== 'nan' ? rawSalStr : 'Not Provided';
@@ -2021,18 +2330,16 @@ export default function App() {
       if (cleanSalRange !== 'Not Provided') {
         bioParts.push(`[SALARY_RANGE:${cleanSalRange}]`);
       }
+      if (rawEduBgVal && rawEduBgVal.toLowerCase() !== 'nan') {
+        bioParts.push(`[EDU_BG:${rawEduBgVal}]`);
+      }
       const n1 = getCell(row, notesIdx);
       const n2 = getCell(row, banglaNoteIdx);
       if (n1 && n1.toLowerCase() !== 'yes' && n1.toLowerCase() !== 'nan') bioParts.push(n1);
       if (n2 && n2 !== n1 && n2.toLowerCase() !== 'nan') bioParts.push(n2);
 
       const combinedNotes = [n1, n2].filter(Boolean).join(' • ');
-      const subjectsVal = inferSubjectsForTutor(
-        getCell(row, subjIdx),
-        deptVal,
-        classesVal,
-        combinedNotes
-      );
+      const subjectsVal = inferSubjectsForTutor(rawSubjCell, deptVal, classesVal, combinedNotes);
       const rawTypeCell = getCell(row, tuitionTypeIdx);
       const rawDaysCell = getCell(row, daysIdx);
 
@@ -2050,6 +2357,16 @@ export default function App() {
           : 'Negotiable';
 
       const cleanedName = cleanTutorName(rawName);
+      if (!cleanedName) continue;
+
+      const eduProfile = parseTutorEducationBackground(
+        rawEduBgVal,
+        classesVal,
+        combinedNotes,
+        uniVal,
+        deptVal
+      );
+
       const tutorItem: Tutor = {
         id: Date.now() + r + Math.floor(Math.random() * 10000),
         name: cleanedName,
@@ -2069,6 +2386,7 @@ export default function App() {
         salaryRange: cleanSalRange,
         tuitionType: finalTuitionType,
         preferredDays: finalPreferredDays,
+        educationBackground: eduProfile.displayLabel,
         bio: bioParts.join(' • '),
         avatar: getCleanAvatarUrl(cleanedName),
       };
@@ -2175,31 +2493,60 @@ export default function App() {
               const codeStr = String(r.id || r.code || r.tuition_code || 'AT9832');
               const daysPart = String(r.preferredDays || '4 Days/Week');
               const genderPart = String(r.preferredGender || 'Any');
+              const rawType = String(r.tuitionType || 'Home Tuition');
+              const normType =
+                rawType === 'Home'
+                  ? 'Home Tuition'
+                  : rawType === 'Online'
+                  ? 'Online Tuition'
+                  : rawType === 'Batch'
+                  ? 'Batch Tuition'
+                  : rawType;
               const scheduleStr = r.schedule
                 ? String(r.schedule)
                 : daysPart.includes('(')
                 ? daysPart
                 : `${daysPart} (${genderPart})`;
               const rawNote = String(r.note ?? r.notes ?? '').trim();
+              const eduMatch = rawNote.match(/\[EDU_BG:(.*?)\]/);
+              const cleanNote = rawNote.replace(/\[EDU_BG:.*?\]/g, '').trim();
+              const rawAreaStr = String(r.tuitionArea || r.location || 'Dhanmondi (General)');
+              const parsedAreas = cleanAreasList(rawAreaStr);
+              const rawSalaryStr = String(r.salaryRange || r.salary || 'Negotiable');
+              const salBounds = parseSalaryRangeBounds(rawSalaryStr, 0);
               return {
                 id: String(r.id || codeStr),
                 code: codeStr,
                 studentName: String(r.studentName || r.student_name || 'Student'),
                 guardianName: String(r.guardianName || r.guardian_name || 'Guardian'),
                 className: String(r.className || r.class_name || 'Class 9'),
-                location: String(r.tuitionArea || r.location || 'Dhanmondi (General)'),
+                educationMedium: eduMatch ? eduMatch[1].trim() : 'Any',
+                location: rawAreaStr,
+                areas:
+                  parsedAreas.length > 0
+                    ? parsedAreas
+                    : rawAreaStr.replace(/\(.*?\)/g, '').trim()
+                    ? [rawAreaStr.replace(/\(.*?\)/g, '').trim()]
+                    : [],
                 preferredVarsity: String(
                   r.preferredUniversity ||
                     r.preferredVarsity ||
                     r.preferred_varsity ||
                     'All Universities'
                 ),
+                preferredDepartment: String(
+                  r.preferredDepartment || r.preferred_department || 'All Departments'
+                ),
+                preferredGender: genderPart,
+                tuitionType: normType,
+                preferredDays: daysPart,
                 schedule: scheduleStr,
-                salary: String(r.salaryRange || r.salary || 'Negotiable'),
+                salary: rawSalaryStr,
+                salaryBudgetCap: salBounds.hasSalary ? salBounds.max : 25000,
                 contact:
                   formatBdPhoneNumbers(r.guardianPhone || r.contact || r.phone || '')
                     .localWithZero || String(r.guardianPhone || r.contact || ''),
-                notes: rawNote || '""',
+                notes: cleanNote || '""',
                 subjects: ensureArray(r.subjects),
               };
             })
@@ -2312,7 +2659,10 @@ export default function App() {
             });
           } else {
             const exNorm = normalizeTutorRow(existing);
-            const cleanStBio = st.bio.replace(/\[SALARY_RANGE:[^\]]+\]\s*•?\s*/g, '').trim();
+            const cleanStBio = st.bio
+              .replace(/\[SALARY_RANGE:[^\]]+\]\s*•?\s*/g, '')
+              .replace(/\[EDU_BG:[^\]]+\]\s*•?\s*/g, '')
+              .trim();
             const changed =
               exNorm.name !== st.name ||
               exNorm.gender !== st.gender ||
@@ -2320,6 +2670,7 @@ export default function App() {
               exNorm.department !== st.department ||
               exNorm.presentAddress !== st.presentAddress ||
               exNorm.salaryRange !== st.salaryRange ||
+              exNorm.educationBackground !== st.educationBackground ||
               JSON.stringify(exNorm.classes) !== JSON.stringify(st.classes) ||
               JSON.stringify(exNorm.preferredAreas) !== JSON.stringify(st.preferredAreas) ||
               JSON.stringify(exNorm.subjects) !== JSON.stringify(st.subjects) ||
@@ -2394,7 +2745,7 @@ export default function App() {
     fetchPaymentsFromSupabase,
   ]);
 
-  // Add Manual Request Handler (Saves directly to Supabase guardian_requests)
+  // Add Manual Request Handler (Saves all Guardian Requirements directly to Supabase guardian_requests)
   const handleAddManualRequest = async () => {
     if (!newRequestForm.studentName.trim() && !newRequestForm.guardianName.trim()) {
       triggerToast('Student বা Guardian এর নাম লিখুন!');
@@ -2407,25 +2758,59 @@ export default function App() {
       formatBdPhoneNumbers(newRequestForm.contact).localWithZero ||
       newRequestForm.contact.trim() ||
       'Not Provided';
-    const schedStr = newRequestForm.schedule.trim() || '4 Days/Week (Any)';
-    const genderMatch = schedStr.match(/\((Male|Female|Any)\)/i);
-    const preferredGender = genderMatch ? genderMatch[1] : 'Any';
-    const preferredDays = schedStr.replace(/\(.*?\)/g, '').trim() || '4 Days/Week';
 
+    const preferredGender = newRequestForm.preferredGender || 'Any';
+    const preferredDays = newRequestForm.preferredDays || '4 Days/Week';
+    const tuitionType = newRequestForm.tuitionType || 'Home Tuition';
+    const schedStr = `${preferredDays} (${preferredGender})`;
+
+    const combinedAreas = Array.from(
+      new Set([
+        ...newRequestForm.areas,
+        ...(newRequestForm.location.trim()
+          ? ensureArray(newRequestForm.location.trim())
+          : []),
+      ])
+    );
+    const locationDisplay =
+      combinedAreas.length > 0 ? combinedAreas.join(', ') : 'Dhanmondi (General)';
+
+    const salaryStr =
+      newRequestForm.salary.trim() && newRequestForm.salary.trim() !== 'Negotiable'
+        ? newRequestForm.salary.trim()
+        : Number(newRequestForm.salaryBudgetCap) < 25000
+        ? `BDT ${Number(newRequestForm.salaryBudgetCap).toLocaleString()}/mo`
+        : 'Negotiable';
+
+    const eduMed = newRequestForm.educationMedium || 'Any';
     const item: TuitionRequest = {
       id: reqCode,
       code: reqCode,
       studentName: newRequestForm.studentName.trim() || 'Student',
       guardianName: newRequestForm.guardianName.trim() || 'Guardian',
       className: newRequestForm.className.trim() || 'Class 9',
-      location: newRequestForm.location.trim() || 'Dhanmondi (General)',
+      educationMedium: eduMed,
+      location: locationDisplay,
+      areas: combinedAreas,
       preferredVarsity: newRequestForm.preferredVarsity.trim() || 'All Universities',
+      preferredDepartment: newRequestForm.preferredDepartment.trim() || 'All Departments',
+      preferredGender,
+      tuitionType,
+      preferredDays,
       schedule: schedStr,
-      salary: newRequestForm.salary.trim() || 'Negotiable',
+      salary: salaryStr,
+      salaryBudgetCap: Number(newRequestForm.salaryBudgetCap) || 25000,
       contact: cleanContact,
       notes: newRequestForm.notes.trim() || '""',
-      subjects: [],
+      subjects: newRequestForm.subjects,
     };
+
+    const noteWithEdu = [
+      eduMed && eduMed !== 'Any' ? `[EDU_BG:${eduMed}]` : '',
+      newRequestForm.notes.trim(),
+    ]
+      .filter(Boolean)
+      .join(' ');
 
     const dbPayload = {
       id: reqCode,
@@ -2433,15 +2818,15 @@ export default function App() {
       studentName: item.studentName,
       className: item.className,
       subjects: item.subjects,
-      preferredGender,
+      preferredGender: item.preferredGender,
       preferredUniversity: item.preferredVarsity,
-      preferredDepartment: 'All Departments',
+      preferredDepartment: item.preferredDepartment,
       tuitionArea: item.location,
       salaryRange: item.salary,
-      preferredDays,
-      tuitionType: 'Home',
+      preferredDays: item.preferredDays,
+      tuitionType: item.tuitionType,
       guardianPhone: item.contact,
-      note: newRequestForm.notes.trim() || '',
+      note: noteWithEdu,
     };
 
     const client = getSupabaseClient();
@@ -2463,7 +2848,7 @@ export default function App() {
       code: `AT${Math.floor(1000 + Math.random() * 9000)}`,
     });
     setAddRequestModalOpen(false);
-    triggerToast('নতুন টিউশন রিকোয়েস্ট সুপাবেসে সংরক্ষিত হয়েছে!');
+    triggerToast('নতুন গার্ডিয়ান রিকোয়েস্ট সুপাবেসে সংরক্ষিত হয়েছে!');
   };
 
   // Delete Request Handler (Deletes directly from Supabase guardian_requests)
@@ -2484,31 +2869,64 @@ export default function App() {
     triggerToast('রিকোয়েস্ট সুপাবেস থেকে মুছে ফেলা হয়েছে!');
   };
 
-  // Match Tutors Now from Request Card
+  // Match Tutors Now from Request Card (populates all Guardian Requirement filters)
   const handleMatchFromRequest = (req: TuitionRequest) => {
-    const cleanArea = (req.location || '').replace(/\(.*?\)/g, '').trim();
+    const reqAreas =
+      req.areas && req.areas.length > 0
+        ? req.areas
+        : (req.location || '').replace(/\(.*?\)/g, '').trim()
+        ? ensureArray((req.location || '').replace(/\(.*?\)/g, '').trim())
+        : [];
+
     const schedLower = String(req.schedule || '').toLowerCase();
+    const typeLower = String(req.tuitionType || '').toLowerCase();
     let matchedType = 'Any';
-    if (schedLower.includes('online')) matchedType = 'Online Tuition';
-    else if (schedLower.includes('batch')) matchedType = 'Batch Tuition';
-    else if (schedLower.includes('home')) matchedType = 'Home Tuition';
+    if (typeLower.includes('online') || schedLower.includes('online')) {
+      matchedType = 'Online Tuition';
+    } else if (typeLower.includes('batch') || schedLower.includes('batch')) {
+      matchedType = 'Batch Tuition';
+    } else if (typeLower.includes('home') || schedLower.includes('home')) {
+      matchedType = 'Home Tuition';
+    }
 
     let matchedDays = 'Any';
-    const dayMatch = schedLower.match(/\b([3-6])\s*days?\/week\b/i);
-    if (dayMatch && !schedLower.includes('any')) {
+    const daySource = `${req.preferredDays || ''} ${req.schedule || ''}`;
+    const dayMatch = daySource.match(/\b([3-6])\s*days?\/week\b/i);
+    if (dayMatch && !String(req.preferredDays || '').toLowerCase().startsWith('any')) {
       matchedDays = `${dayMatch[1]} Days/Week`;
     }
+
+    const matchedGender =
+      req.preferredGender === 'Male' || req.preferredGender === 'Female'
+        ? req.preferredGender
+        : 'Any';
+
+    const salBounds = parseSalaryRangeBounds(req.salary, 0);
+    const budgetCap =
+      req.salaryBudgetCap && req.salaryBudgetCap < 25000
+        ? req.salaryBudgetCap
+        : salBounds.hasSalary
+        ? salBounds.max
+        : 25000;
 
     const updatedReq: RequirementsState = {
       ...requirements,
       guardianName: req.guardianName || 'Mr. Hasan',
       batchCode: req.code || 'AT9832',
       selectedClass: req.className || 'All Classes',
+      selectedEducationMedium: req.educationMedium || 'Any',
+      selectedSubjects: Array.isArray(req.subjects) ? req.subjects : [],
+      preferredGender: matchedGender,
       selectedUniversity:
         req.preferredVarsity && req.preferredVarsity !== 'All Universities'
           ? req.preferredVarsity
           : 'All Universities',
-      selectedAreas: cleanArea ? [cleanArea] : [],
+      selectedDepartment:
+        req.preferredDepartment && req.preferredDepartment !== 'All Departments'
+          ? req.preferredDepartment
+          : 'All Departments',
+      selectedAreas: reqAreas,
+      salaryBudgetCap: budgetCap,
       tuitionType: matchedType,
       preferredDays: matchedDays,
     };
@@ -2643,10 +3061,12 @@ export default function App() {
       allNums && allNums.length > 0 ? Math.max(...allNums.map((n) => parseInt(n, 10))) : 0;
     const chosenType = newTutorForm.tuitionType || 'Home Tuition';
     const chosenDays = newTutorForm.preferredDays || 'Negotiable';
+    const chosenEduBg = (newTutorForm.educationBackground || 'Bangla Version').trim();
     const storedBio = [
       cleanRange !== 'Not Provided' ? `[SALARY_RANGE:${cleanRange}]` : '',
       chosenType ? `[TUITION_TYPE:${chosenType}]` : '',
       chosenDays && chosenDays !== 'Negotiable' ? `[PREFERRED_DAYS:${chosenDays}]` : '',
+      chosenEduBg ? `[EDU_BG:${chosenEduBg}]` : '',
       newTutorForm.bio.trim(),
     ]
       .filter(Boolean)
@@ -2685,7 +3105,7 @@ export default function App() {
     triggerToast('নতুন টিউটর সফলভাবে যুক্ত হয়েছে!');
   };
 
-  // Upload CSV File Handler
+  // Upload CSV File Handler (Non-destructive Merge / Upsert into Supabase)
   const handleCsvFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -2700,6 +3120,7 @@ export default function App() {
 
     if (allParsed.length === 0) {
       triggerToast('CSV ফাইলে কোনো বৈধ টিউটর পাওয়া যায়নি!');
+      e.target.value = '';
       return;
     }
 
@@ -2712,6 +3133,7 @@ export default function App() {
           ...t,
           subjects: t.subjects.length > 0 ? t.subjects : prev.subjects,
           preferredAreas: t.preferredAreas.length > 0 ? t.preferredAreas : prev.preferredAreas,
+          classes: t.classes.length > 0 ? t.classes : prev.classes,
           bio: t.bio || prev.bio,
         });
       } else {
@@ -2720,12 +3142,46 @@ export default function App() {
     });
 
     const finalList = Array.from(mergedMap.values());
+    const uploadedPhoneSet = new Set(finalList.map((t) => t.phone));
+
+    // If any uploaded tutor was previously deleted, restore them from deletedPhones blacklist
+    if (deletedPhones.some((p) => uploadedPhoneSet.has(p))) {
+      const updatedDeleted = deletedPhones.filter((p) => !uploadedPhoneSet.has(p));
+      setDeletedPhones(updatedDeleted);
+      localStorage.setItem('at_deleted_phones_v5', JSON.stringify(updatedDeleted));
+    }
+
     const client = getSupabaseClient();
     if (client) {
       setIsLoadingDb(true);
       try {
-        await client.from(supabaseConfig.tableName).delete().neq('id', -999999);
-        const dbRows = finalList.map((t) => ({
+        // Fetch existing rows so we only replace matching phone numbers and NEVER wipe other existing tutors
+        const { data: existingRows, error: fetchErr } = await client
+          .from(supabaseConfig.tableName)
+          .select('id, phone');
+        if (fetchErr) throw fetchErr;
+
+        const matchingIdsToDelete: Array<number | string> = [];
+        (existingRows || []).forEach((r: Record<string, unknown>) => {
+          const normPhone = formatBdPhoneNumbers(r.phone || '').localWithZero;
+          if (normPhone && uploadedPhoneSet.has(normPhone) && r.id !== undefined && r.id !== null) {
+            matchingIdsToDelete.push(r.id as number | string);
+          }
+        });
+
+        if (matchingIdsToDelete.length > 0) {
+          for (let i = 0; i < matchingIdsToDelete.length; i += 100) {
+            const chunk = matchingIdsToDelete.slice(i, i + 100);
+            const { error: delErr } = await client
+              .from(supabaseConfig.tableName)
+              .delete()
+              .in('id', chunk);
+            if (delErr) throw delErr;
+          }
+        }
+
+        // Reverse order before inserting so row #1 of the CSV gets the highest ID and appears first (id DESC)
+        const dbRows = [...finalList].reverse().map((t) => ({
           name: t.name,
           gender: t.gender,
           phone: t.phone,
@@ -2739,9 +3195,17 @@ export default function App() {
           bio: t.bio,
           avatar: t.avatar,
         }));
-        await client.from(supabaseConfig.tableName).insert(dbRows);
-        await fetchTutorsFromSupabase(true);
-        triggerToast(`${finalList.length} জন টিউটরের তথ্য সুপাবেসে সফলভাবে স্টোর হয়েছে!`);
+
+        for (let i = 0; i < dbRows.length; i += 100) {
+          const chunk = dbRows.slice(i, i + 100);
+          const { error: insErr } = await client.from(supabaseConfig.tableName).insert(chunk);
+          if (insErr) throw insErr;
+        }
+
+        const refreshed = await fetchTutorsFromSupabase(true);
+        triggerToast(
+          `CSV আপলোড সফল! আপলোডেড: ${finalList.length} জন • মোট টিউটর: ${refreshed.length} জন`
+        );
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         triggerToast(`Upload Error: ${message}`);
@@ -2749,7 +3213,10 @@ export default function App() {
         setIsLoadingDb(false);
       }
     } else {
-      setTutors(finalList);
+      setTutors((prev) => {
+        const remaining = prev.filter((p) => !uploadedPhoneSet.has(p.phone));
+        return [...finalList, ...remaining];
+      });
       triggerToast(`${finalList.length} জন টিউটর লোড হয়েছে!`);
     }
     e.target.value = '';
@@ -2773,8 +3240,16 @@ export default function App() {
       const norm = normalizeSingleAreaToken(a) || a;
       mapByLower.set(norm.toLowerCase(), norm);
     });
+    tutors.forEach((t) => {
+      (t.preferredAreas || []).forEach((a) => {
+        const clean = a.trim();
+        if (clean && clean.length >= 2 && !mapByLower.has(clean.toLowerCase())) {
+          mapByLower.set(clean.toLowerCase(), clean);
+        }
+      });
+    });
     return Array.from(mapByLower.values()).sort((a, b) => a.localeCompare(b));
-  }, []);
+  }, [tutors]);
 
   const updateRequirementsFilter = useCallback(
     (updater: Partial<RequirementsState> | ((prev: RequirementsState) => RequirementsState)) => {
@@ -2788,24 +3263,33 @@ export default function App() {
   // Matched & Filtered Tutors Calculation
   const matchedTutors = useMemo(() => {
     const activeFilter = appliedRequirements;
-    const budgetCap = Number(activeFilter.salaryBudgetCap) || 25000;
-    const isBudgetFilterActive = budgetCap < 25000;
 
     return tutors
       .filter((t) => {
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
-          const hay = `${t.name} ${t.university} ${t.department} ${t.presentAddress} ${t.phone} ${(
-            t.preferredAreas || []
-          ).join(' ')} ${(t.subjects || []).join(' ')} ${(t.classes || []).join(' ')} ${
-            t.salaryRange || ''
-          } ${t.tuitionType || ''} ${t.preferredDays || ''}`.toLowerCase();
+          const hay = `${t.name} ${t.university} ${t.department} ${t.presentAddress} ${t.phone} ${
+            t.educationBackground || ''
+          } ${(t.preferredAreas || []).join(' ')} ${(t.subjects || []).join(' ')} ${(
+            t.classes || []
+          ).join(' ')} ${t.salaryRange || ''} ${t.tuitionType || ''} ${
+            t.preferredDays || ''
+          }`.toLowerCase();
           if (!hay.includes(q)) return false;
         }
 
         if (activeFilter.selectedClass && activeFilter.selectedClass !== 'All Classes') {
           const classMatch = getTutorClassMatchResult(t.classes, activeFilter.selectedClass);
           if (!classMatch.matches) return false;
+        }
+
+        if (
+          activeFilter.selectedEducationMedium &&
+          activeFilter.selectedEducationMedium !== 'Any' &&
+          activeFilter.selectedEducationMedium !== 'All Mediums'
+        ) {
+          const medMatch = getTutorEducationMediumMatch(t, activeFilter.selectedEducationMedium);
+          if (!medMatch.matches) return false;
         }
 
         if (activeFilter.selectedSubjects.length > 0) {
@@ -2871,12 +3355,6 @@ export default function App() {
           if (!hasArea) return false;
         }
 
-        if (isBudgetFilterActive) {
-          const bounds = parseSalaryRangeBounds(t.salaryRange, t.expectedSalary);
-          if (!bounds.hasSalary) return false;
-          if (budgetCap < bounds.min || budgetCap > bounds.max) return false;
-        }
-
         if (
           activeFilter.tuitionType &&
           activeFilter.tuitionType !== 'Any' &&
@@ -2912,6 +3390,14 @@ export default function App() {
           const classMatch = getTutorClassMatchResult(t.classes, activeFilter.selectedClass);
           score += classMatch.specificityBonus;
         }
+        if (
+          activeFilter.selectedEducationMedium &&
+          activeFilter.selectedEducationMedium !== 'Any' &&
+          activeFilter.selectedEducationMedium !== 'All Mediums'
+        ) {
+          const medMatch = getTutorEducationMediumMatch(t, activeFilter.selectedEducationMedium);
+          score += medMatch.bonus;
+        }
         if (activeFilter.selectedAreas.length > 0) score += 18;
         if (activeFilter.selectedSubjects.length > 0) score += 12;
         if (activeFilter.selectedUniversity !== 'All Universities') score += 5;
@@ -2929,9 +3415,6 @@ export default function App() {
         ) {
           score += 8;
         }
-        if (isBudgetFilterActive && bounds.hasSalary && budgetCap >= bounds.min && budgetCap <= bounds.max) {
-          score += 8;
-        }
         return {
           ...t,
           salaryMin: bounds.min,
@@ -2943,9 +3426,6 @@ export default function App() {
       .sort((a, b) => {
         if ((b.matchScore || 0) !== (a.matchScore || 0)) {
           return (b.matchScore || 0) - (a.matchScore || 0);
-        }
-        if (isBudgetFilterActive && a.salaryMin !== b.salaryMin) {
-          return a.salaryMin - b.salaryMin;
         }
         return 0;
       });
@@ -2965,27 +3445,59 @@ export default function App() {
     });
   }, [tutors, searchQuery]);
 
-  // Filtered Guardian Requests (searches by code, student, guardian, location, class, varsity, contact, subjects, notes)
+  // Filtered Guardian Requests (searches by code, student, guardian, location, class, varsity, department, gender, type, contact, subjects, notes)
   const filteredRequests = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     if (!q) return tuitionRequests;
     return tuitionRequests.filter((req) => {
       const hay = `${req.code} ${req.studentName} ${req.guardianName} ${req.className} ${
         req.location
-      } ${req.preferredVarsity} ${req.schedule} ${req.salary} ${req.contact} ${req.notes} ${(
-        req.subjects || []
-      ).join(' ')}`.toLowerCase();
+      } ${req.preferredVarsity} ${req.preferredDepartment || ''} ${req.preferredGender || ''} ${
+        req.tuitionType || ''
+      } ${req.schedule} ${req.salary} ${req.contact} ${req.notes} ${(req.subjects || []).join(
+        ' '
+      )}`.toLowerCase();
       return hay.includes(q);
     });
   }, [tuitionRequests, searchQuery]);
 
-  // Filtered Payments Ledger (filters by ledgerFilter tab + searchQuery)
+  // Date-filtered Payment Records (applies before tab filter & KPI cards so KPIs reflect selected date/month/range)
+  const dateFilteredPayments = useMemo(() => {
+    return paymentRecords.filter((rec) => {
+      const joinDate = String(rec.joiningDate || '').trim();
+      if (ledgerDateMode === 'date' && ledgerSelectedDate) {
+        return joinDate === ledgerSelectedDate;
+      }
+      if (ledgerDateMode === 'month' && ledgerSelectedMonth) {
+        return joinDate.startsWith(ledgerSelectedMonth);
+      }
+      if (ledgerDateMode === 'range') {
+        if (ledgerStartDate && joinDate < ledgerStartDate) return false;
+        if (ledgerEndDate && joinDate > ledgerEndDate) return false;
+        return true;
+      }
+      return true;
+    });
+  }, [
+    paymentRecords,
+    ledgerDateMode,
+    ledgerSelectedDate,
+    ledgerSelectedMonth,
+    ledgerStartDate,
+    ledgerEndDate,
+  ]);
+
+  // Filtered Payments Ledger (filters by dateFilteredPayments + ledgerFilter tab + searchQuery)
   const filteredPayments = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     const currentMonthPrefix = new Date().toISOString().slice(0, 7);
-    return paymentRecords.filter((rec) => {
-      if (ledgerFilter === 'due' && rec.dueAmount <= 0) return false;
-      if (ledgerFilter === 'paid' && rec.dueAmount > 0) return false;
+    return dateFilteredPayments.filter((rec) => {
+      const dueAmt = Math.max(
+        0,
+        Number(rec.dueAmount) || Math.max(0, (Number(rec.monthlyFee) || 0) - (Number(rec.paidAmount) || 0))
+      );
+      if (ledgerFilter === 'due' && dueAmt <= 0) return false;
+      if (ledgerFilter === 'paid' && dueAmt > 0) return false;
       if (
         ledgerFilter === 'month' &&
         !String(rec.joiningDate || '').startsWith(currentMonthPrefix)
@@ -2993,12 +3505,12 @@ export default function App() {
         return false;
       }
       if (q) {
-        const hay = `${rec.tuitionCode} ${rec.tutorName} ${rec.tutorPhone} ${rec.studentName} ${rec.area} ${rec.joiningDate} ${rec.monthlyFee} ${rec.paidAmount} ${rec.status}`.toLowerCase();
+        const hay = `${rec.tuitionCode} ${rec.tutorName} ${rec.tutorPhone} ${rec.studentName} ${rec.area} ${rec.joiningDate} ${rec.monthlyFee} ${rec.paidAmount} ${dueAmt} ${rec.status}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [paymentRecords, ledgerFilter, searchQuery]);
+  }, [dateFilteredPayments, ledgerFilter, searchQuery]);
 
   // Open Single Offer Modal
   const handleOpenSingleSms = (tutor: Tutor) => {
@@ -3799,6 +4311,7 @@ export default function App() {
                       const resetObj: RequirementsState = {
                         ...requirements,
                         selectedClass: 'All Classes',
+                        selectedEducationMedium: 'Any',
                         selectedSubjects: [],
                         preferredGender: 'Any',
                         selectedUniversity: 'All Universities',
@@ -3810,6 +4323,7 @@ export default function App() {
                       };
                       setRequirements(resetObj);
                       setAppliedRequirements(resetObj);
+                      setManualLocationQuery('');
                       triggerToast('সকল ফিল্টার রিসেট করা হয়েছে!');
                     }}
                     className="text-xs font-semibold text-slate-400 hover:text-rose-600 transition"
@@ -3838,6 +4352,34 @@ export default function App() {
                         {c}
                       </option>
                     ))}
+                  </select>
+                </div>
+
+                {/* 1B. Select Your Education Background (Medium / Version) */}
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                    Select Your Education Background (Medium / Version)
+                  </label>
+                  <select
+                    value={requirements.selectedEducationMedium || 'Any'}
+                    onChange={(e) =>
+                      updateRequirementsFilter({ selectedEducationMedium: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2.5 text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="Any">All Mediums / Version (সব মিডিয়াম)</option>
+                    <option value="Bangla Version">
+                      Bangla Version / Medium (বাংলা ভার্সন / মিডিয়াম)
+                    </option>
+                    <option value="English Version">
+                      English Version (ইংলিশ ভার্সন)
+                    </option>
+                    <option value="English Medium">
+                      English Medium (ইংলিশ মিডিয়াম - O/A Level)
+                    </option>
+                    <option value="Madrasa Medium">
+                      Madrasa Medium (মাদ্রাসা মিডিয়াম)
+                    </option>
                   </select>
                 </div>
 
@@ -3965,15 +4507,133 @@ export default function App() {
                     <label className="text-xs font-extrabold text-slate-800">
                       Tuition Area(s) ({requirements.selectedAreas.length} selected)
                     </label>
-                    {requirements.selectedAreas.length > 0 && (
+                    {(requirements.selectedAreas.length > 0 || manualLocationQuery.trim()) && (
                       <button
-                        onClick={() => updateRequirementsFilter({ selectedAreas: [] })}
+                        type="button"
+                        onClick={() => {
+                          updateRequirementsFilter({ selectedAreas: [] });
+                          setManualLocationQuery('');
+                        }}
                         className="text-[11px] font-semibold text-slate-400 hover:text-rose-600"
                       >
                         Clear All
                       </button>
                     )}
                   </div>
+
+                  {/* Manual Location Search & Custom Input */}
+                  <div className="relative mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <div className="relative flex-1">
+                        <Icon
+                          name="search"
+                          size={14}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                        />
+                        <input
+                          type="text"
+                          value={manualLocationQuery}
+                          onChange={(e) => setManualLocationQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const val = manualLocationQuery.trim();
+                              if (val) {
+                                const normVal = normalizeSingleAreaToken(val) || val;
+                                if (!requirements.selectedAreas.includes(normVal)) {
+                                  updateRequirementsFilter({
+                                    selectedAreas: [...requirements.selectedAreas, normVal],
+                                  });
+                                }
+                                setManualLocationQuery('');
+                              }
+                            }
+                          }}
+                          placeholder="লোকেশন লিখে সার্চ করুন (যেমন: Dhanmondi, Mirpur...)"
+                          className="w-full pl-8 pr-7 py-2.5 text-xs font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                        {manualLocationQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setManualLocationQuery('')}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                          >
+                            <Icon name="x" size={13} />
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const val = manualLocationQuery.trim();
+                          if (!val) return;
+                          const normVal = normalizeSingleAreaToken(val) || val;
+                          if (!requirements.selectedAreas.includes(normVal)) {
+                            updateRequirementsFilter({
+                              selectedAreas: [...requirements.selectedAreas, normVal],
+                            });
+                          }
+                          setManualLocationQuery('');
+                        }}
+                        className="px-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-extrabold flex-shrink-0 transition shadow-xs"
+                      >
+                        + Add
+                      </button>
+                    </div>
+
+                    {/* Live Matching Area Suggestions Dropdown */}
+                    {manualLocationQuery.trim().length > 0 && (
+                      <div className="mt-1.5 max-h-40 overflow-y-auto bg-white border border-slate-200 rounded-2xl shadow-lg divide-y divide-slate-100 z-20">
+                        {uniqueAreas
+                          .filter(
+                            (a) =>
+                              a.toLowerCase().includes(manualLocationQuery.trim().toLowerCase()) &&
+                              !requirements.selectedAreas.includes(a)
+                          )
+                          .slice(0, 8)
+                          .map((suggestion) => (
+                            <button
+                              key={suggestion}
+                              type="button"
+                              onClick={() => {
+                                updateRequirementsFilter({
+                                  selectedAreas: [...requirements.selectedAreas, suggestion],
+                                });
+                                setManualLocationQuery('');
+                              }}
+                              className="w-full px-3.5 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center justify-between transition"
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <Icon name="mapPin" size={12} className="text-emerald-600" />
+                                <span>{suggestion}</span>
+                              </span>
+                              <span className="text-[10px] font-bold text-emerald-600">
+                                + Select
+                              </span>
+                            </button>
+                          ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const val = manualLocationQuery.trim();
+                            if (!val) return;
+                            if (!requirements.selectedAreas.includes(val)) {
+                              updateRequirementsFilter({
+                                selectedAreas: [...requirements.selectedAreas, val],
+                              });
+                            }
+                            setManualLocationQuery('');
+                          }}
+                          className="w-full px-3.5 py-2 text-left text-xs font-bold text-emerald-700 bg-emerald-50/60 hover:bg-emerald-100/70 flex items-center justify-between transition"
+                        >
+                          <span>Use custom location: &quot;{manualLocationQuery.trim()}&quot;</span>
+                          <span className="text-[10px] font-extrabold">+ Add Custom</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Dropdown Selection */}
                   <select
                     defaultValue=""
                     onChange={(e) => {
@@ -3988,7 +4648,7 @@ export default function App() {
                     className="w-full px-3.5 py-2.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
                     <option value="" disabled>
-                      + Add Location / এলাকা যোগ করুন
+                      + তালিকায় থাকা এলাকা থেকে বেছে নিন (Dropdown)
                     </option>
                     {uniqueAreas.map((a) => (
                       <option key={a} value={a}>
@@ -4056,70 +4716,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 7. Salary Budget Cap Slider & Quick Presets */}
-                <div className="pt-1">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-extrabold text-slate-800">
-                      Salary Budget Cap
-                    </label>
-                    <span className="text-xs font-mono font-extrabold text-emerald-600">
-                      {Number(requirements.salaryBudgetCap) >= 25000
-                        ? 'Any Budget (All)'
-                        : `BDT ${Number(requirements.salaryBudgetCap).toLocaleString()}/mo`}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="2000"
-                    max="25000"
-                    step="500"
-                    value={requirements.salaryBudgetCap}
-                    onChange={(e) =>
-                      updateRequirementsFilter({
-                        salaryBudgetCap: Number(e.target.value),
-                      })
-                    }
-                    className="w-full accent-emerald-600 cursor-pointer"
-                  />
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {[
-                      { label: 'Any', val: 25000 },
-                      { label: '3-5,000', val: 3500 },
-                      { label: '4-7,000', val: 5500 },
-                      { label: '6-10,000', val: 8000 },
-                    ].map((preset) => {
-                      const bVal = Number(requirements.salaryBudgetCap);
-                      const isActive =
-                        preset.val === 25000
-                          ? bVal >= 25000
-                          : preset.val === 3500
-                          ? bVal >= 3000 && bVal < 4000
-                          : preset.val === 5500
-                          ? bVal > 5000 && bVal < 6000
-                          : bVal > 7000 && bVal <= 10000;
-                      return (
-                        <button
-                          key={preset.val}
-                          type="button"
-                          onClick={() =>
-                            updateRequirementsFilter({
-                              salaryBudgetCap: preset.val,
-                            })
-                          }
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
-                            isActive
-                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700'
-                          }`}
-                        >
-                          {preset.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* 8. Tuition Type & Preferred Days */}
+                {/* 7. Tuition Type & Preferred Days */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
@@ -4164,7 +4761,20 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      setAppliedRequirements({ ...requirements });
+                      let nextReq = { ...requirements };
+                      const typedLoc = manualLocationQuery.trim();
+                      if (typedLoc) {
+                        const normLoc = normalizeSingleAreaToken(typedLoc) || typedLoc;
+                        if (!nextReq.selectedAreas.includes(normLoc)) {
+                          nextReq = {
+                            ...nextReq,
+                            selectedAreas: [...nextReq.selectedAreas, normLoc],
+                          };
+                          setRequirements(nextReq);
+                        }
+                        setManualLocationQuery('');
+                      }
+                      setAppliedRequirements(nextReq);
                       setIsMobileFiltersOpen(false);
                       window.scrollTo({ top: 0, behavior: 'smooth' });
                       triggerToast('ফিল্টার অনুযায়ী টিউটর তালিকা আপডেট করা হয়েছে!');
@@ -4294,6 +4904,11 @@ export default function App() {
                                 {ensureArray(tutor.classes).length > 0 && (
                                   <span className="px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-violet-50 text-violet-700 border border-violet-200">
                                     Class: {ensureArray(tutor.classes).slice(0, 2).join(', ')}
+                                  </span>
+                                )}
+                                {tutor.educationBackground && (
+                                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
+                                    {tutor.educationBackground}
                                   </span>
                                 )}
                                 {tutor.tuitionType && (
@@ -4540,6 +5155,16 @@ export default function App() {
                       </div>
 
                       <div className="flex items-center gap-2">
+                        {req.preferredGender && req.preferredGender !== 'Any' && (
+                          <span className="px-2.5 py-1 rounded-xl bg-sky-50 text-sky-700 border border-sky-200 text-xs font-extrabold">
+                            {req.preferredGender} Tutor
+                          </span>
+                        )}
+                        {req.tuitionType && req.tuitionType !== 'Any' && (
+                          <span className="px-2.5 py-1 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-extrabold">
+                            {req.tuitionType}
+                          </span>
+                        )}
                         <span className="px-3 py-1 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-extrabold">
                           {req.salary || 'Negotiable'}
                         </span>
@@ -4555,18 +5180,20 @@ export default function App() {
 
                     <div
                       className={`grid ${
-                        isMobileView ? 'grid-cols-2' : 'grid-cols-4'
+                        isMobileView ? 'grid-cols-2' : 'grid-cols-5'
                       } gap-3 bg-slate-50/80 p-3.5 rounded-2xl border border-slate-100 text-xs`}
                     >
                       <div>
-                        <span className="text-[11px] text-slate-400 font-semibold block">Class</span>
+                        <span className="text-[11px] text-slate-400 font-semibold block">
+                          Class / Grade
+                        </span>
                         <span className="font-extrabold text-slate-900 text-xs sm:text-sm">
                           {req.className}
                         </span>
                       </div>
                       <div>
                         <span className="text-[11px] text-slate-400 font-semibold block">
-                          Location
+                          Tuition Area(s)
                         </span>
                         <span className="font-extrabold text-slate-900 text-xs sm:text-sm">
                           {req.location}
@@ -4582,13 +5209,37 @@ export default function App() {
                       </div>
                       <div>
                         <span className="text-[11px] text-slate-400 font-semibold block">
-                          Schedule &amp; Pref
+                          Department
+                        </span>
+                        <span className="font-extrabold text-slate-900 text-xs sm:text-sm">
+                          {req.preferredDepartment || 'All Departments'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[11px] text-slate-400 font-semibold block">
+                          Schedule &amp; Gender
                         </span>
                         <span className="font-extrabold text-slate-900 text-xs sm:text-sm">
                           {req.schedule}
                         </span>
                       </div>
                     </div>
+
+                    {req.subjects && req.subjects.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 px-1">
+                        <span className="text-[11px] font-bold text-slate-400 mr-1">
+                          Subjects:
+                        </span>
+                        {req.subjects.map((subj) => (
+                          <span
+                            key={subj}
+                            className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-bold"
+                          >
+                            {subj}
+                          </span>
+                        ))}
+                      </div>
+                    )}
 
                     <div className="text-xs text-slate-500 font-medium px-1">{req.notes || '""'}</div>
 
@@ -4616,8 +5267,108 @@ export default function App() {
           {/* TAB: PAYMENTS LEDGER */}
           {activeTab === 'payments' && (
             <div className={`flex-1 ${isMobileView ? '' : 'overflow-y-auto'} p-3 sm:p-5 space-y-4`}>
-              {/* Summary KPI Cards */}
-              <div className={`grid ${isMobileView ? 'grid-cols-1' : 'grid-cols-3'} gap-3.5`}>
+              {/* Date Filter Bar (তারিখ অনুযায়ী ডাটা দেখার অপশন) */}
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-3 sm:p-3.5 shadow-sm flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700 mr-1">
+                    <span className="h-7 w-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                      <Icon name="sliders" size={14} />
+                    </span>
+                    <span>Filter by Date (তারিখ অনুযায়ী দেখুন):</span>
+                  </div>
+
+                  <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200/70">
+                    {[
+                      { id: 'all', label: 'All Dates (সব)' },
+                      { id: 'date', label: 'Specific Date (নির্দিষ্ট দিন)' },
+                      { id: 'month', label: 'By Month (মাস অনুযায়ী)' },
+                      { id: 'range', label: 'Date Range (তারিখ হতে তারিখ)' },
+                    ].map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() =>
+                          setLedgerDateMode(m.id as 'all' | 'date' | 'month' | 'range')
+                        }
+                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition ${
+                          ledgerDateMode === m.id
+                            ? 'bg-white text-emerald-700 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Dynamic Date Picker Inputs based on selected mode */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {ledgerDateMode === 'date' && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-slate-500">Date:</span>
+                      <input
+                        type="date"
+                        value={ledgerSelectedDate}
+                        onChange={(e) => setLedgerSelectedDate(e.target.value)}
+                        className="px-3 py-1.5 text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  )}
+
+                  {ledgerDateMode === 'month' && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-slate-500">Month:</span>
+                      <input
+                        type="month"
+                        value={ledgerSelectedMonth}
+                        onChange={(e) => setLedgerSelectedMonth(e.target.value)}
+                        className="px-3 py-1.5 text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  )}
+
+                  {ledgerDateMode === 'range' && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-slate-500">From:</span>
+                      <input
+                        type="date"
+                        value={ledgerStartDate}
+                        onChange={(e) => setLedgerStartDate(e.target.value)}
+                        className="px-2.5 py-1.5 text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <span className="text-[11px] font-bold text-slate-500">To:</span>
+                      <input
+                        type="date"
+                        value={ledgerEndDate}
+                        onChange={(e) => setLedgerEndDate(e.target.value)}
+                        className="px-2.5 py-1.5 text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  )}
+
+                  {ledgerDateMode !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLedgerDateMode('all');
+                        setLedgerStartDate('');
+                        setLedgerEndDate('');
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 text-[11px] font-extrabold transition"
+                    >
+                      Reset Date
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Summary KPI Cards (Now 4 Cards including TOTAL DUE) */}
+              <div
+                className={`grid ${
+                  isMobileView ? 'grid-cols-1' : 'grid-cols-2 xl:grid-cols-4'
+                } gap-3.5`}
+              >
                 <div className="bg-white rounded-3xl border border-slate-200/80 p-4 sm:p-5 shadow-sm flex items-start justify-between">
                   <div>
                     <span className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
@@ -4625,7 +5376,7 @@ export default function App() {
                     </span>
                     <div className="mt-1.5 flex items-baseline gap-2">
                       <span className="text-2xl sm:text-3xl font-black text-slate-900">
-                        {paymentRecords.length}
+                        {dateFilteredPayments.length}
                       </span>
                       <span className="text-xs sm:text-sm font-semibold text-slate-500">
                         Tuitions
@@ -4648,7 +5399,15 @@ export default function App() {
                     </span>
                     <div className="mt-1.5 flex items-baseline gap-2">
                       <span className="text-2xl sm:text-3xl font-black text-indigo-600">
-                        {paymentRecords.length}
+                        {
+                          dateFilteredPayments.filter((r) =>
+                            String(r.joiningDate || '').startsWith(
+                              ledgerDateMode === 'month' && ledgerSelectedMonth
+                                ? ledgerSelectedMonth
+                                : new Date().toISOString().slice(0, 7)
+                            )
+                          ).length
+                        }
                       </span>
                       <span className="text-xs sm:text-sm font-semibold text-slate-500">
                         Teachers
@@ -4670,7 +5429,7 @@ export default function App() {
                   </span>
                   <div className="my-1.5 text-2xl sm:text-3xl font-black">
                     ৳{' '}
-                    {paymentRecords
+                    {dateFilteredPayments
                       .reduce((sum, r) => sum + (Number(r.paidAmount) || 0), 0)
                       .toLocaleString()}
                   </div>
@@ -4679,14 +5438,91 @@ export default function App() {
                     <span>Successfully cleared</span>
                   </p>
                 </div>
+
+                {/* NEW CARD: TOTAL DUE (বকেয়া টাকা) */}
+                <div className="bg-rose-600 text-white rounded-3xl p-4 sm:p-5 shadow-lg shadow-rose-600/20 flex flex-col justify-between">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-rose-100 block">
+                      TOTAL DUE (বকেয়া টাকা)
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-white/20 text-[10px] font-extrabold text-white">
+                      {
+                        dateFilteredPayments.filter(
+                          (r) =>
+                            Math.max(
+                              0,
+                              Number(r.dueAmount) ||
+                                Math.max(
+                                  0,
+                                  (Number(r.monthlyFee) || 0) - (Number(r.paidAmount) || 0)
+                                )
+                            ) > 0
+                        ).length
+                      }{' '}
+                      Due
+                    </span>
+                  </div>
+                  <div className="my-1.5 text-2xl sm:text-3xl font-black">
+                    ৳{' '}
+                    {dateFilteredPayments
+                      .reduce(
+                        (sum, r) =>
+                          sum +
+                          Math.max(
+                            0,
+                            Number(r.dueAmount) ||
+                              Math.max(
+                                0,
+                                (Number(r.monthlyFee) || 0) - (Number(r.paidAmount) || 0)
+                              )
+                          ),
+                        0
+                      )
+                      .toLocaleString()}
+                  </div>
+                  <p className="text-xs font-bold text-rose-100 flex items-center gap-1">
+                    <Icon name="zap" size={14} />
+                    <span>Pending collection</span>
+                  </p>
+                </div>
               </div>
 
               {/* Filter Tabs */}
               <div className="bg-white rounded-2xl border border-slate-200/80 p-1.5 flex flex-wrap gap-1.5">
                 {[
-                  { id: 'all', label: `All Finalized (${paymentRecords.length})` },
-                  { id: 'due', label: 'Pending Due' },
-                  { id: 'paid', label: 'Fully Paid' },
+                  { id: 'all', label: `All Finalized (${dateFilteredPayments.length})` },
+                  {
+                    id: 'due',
+                    label: `Pending Due (${
+                      dateFilteredPayments.filter(
+                        (r) =>
+                          Math.max(
+                            0,
+                            Number(r.dueAmount) ||
+                              Math.max(
+                                0,
+                                (Number(r.monthlyFee) || 0) - (Number(r.paidAmount) || 0)
+                              )
+                          ) > 0
+                      ).length
+                    })`,
+                  },
+                  {
+                    id: 'paid',
+                    label: `Fully Paid (${
+                      dateFilteredPayments.filter(
+                        (r) =>
+                          Math.max(
+                            0,
+                            Number(r.dueAmount) ||
+                              Math.max(
+                                0,
+                                (Number(r.monthlyFee) || 0) - (Number(r.paidAmount) || 0)
+                              )
+                          ) <= 0
+                      ).length
+                    })`,
+                  },
                   { id: 'month', label: 'This Month' },
                 ].map((tab) => (
                   <button
@@ -4714,79 +5550,100 @@ export default function App() {
                       </p>
                     </div>
                   ) : (
-                    filteredPayments.map((rec) => (
-                      <div
-                        key={rec.id}
-                        className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3 text-xs"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="px-2.5 py-1 rounded-lg bg-slate-100 font-extrabold text-slate-900">
-                            {rec.tuitionCode}
-                          </span>
-                          <span className="text-slate-500 font-semibold">{rec.joiningDate}</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <span className="text-[10px] font-bold uppercase text-slate-400 block">
-                              Tutor
+                    filteredPayments.map((rec) => {
+                      const recDue = Math.max(
+                        0,
+                        Number(rec.dueAmount) ||
+                          Math.max(0, (Number(rec.monthlyFee) || 0) - (Number(rec.paidAmount) || 0))
+                      );
+                      return (
+                        <div
+                          key={rec.id}
+                          className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3 text-xs"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="px-2.5 py-1 rounded-lg bg-slate-100 font-extrabold text-slate-900">
+                              {rec.tuitionCode}
                             </span>
-                            <p className="font-extrabold text-slate-900">{rec.tutorName}</p>
-                            <p className="text-slate-500 font-mono">{rec.tutorPhone}</p>
+                            <span className="text-slate-500 font-semibold">{rec.joiningDate}</span>
                           </div>
-                          <div>
-                            <span className="text-[10px] font-bold uppercase text-slate-400 block">
-                              Student &amp; Area
-                            </span>
-                            <p className="font-bold text-slate-800">{rec.studentName}</p>
-                            <p className="text-slate-500">{rec.area}</p>
-                          </div>
-                        </div>
-                        <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
+                          <div className="grid grid-cols-2 gap-2">
                             <div>
-                              <span className="text-[10px] text-slate-400 font-bold block">
-                                Fee
+                              <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                                Tutor
                               </span>
-                              <span className="font-extrabold text-slate-900">
-                                ৳ {Number(rec.monthlyFee).toLocaleString()}
-                              </span>
+                              <p className="font-extrabold text-slate-900">{rec.tutorName}</p>
+                              <p className="text-slate-500 font-mono">{rec.tutorPhone}</p>
                             </div>
                             <div>
-                              <span className="text-[10px] text-slate-400 font-bold block">
-                                Paid
+                              <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                                Student &amp; Area
                               </span>
-                              <span className="font-extrabold text-emerald-700">
-                                ৳ {Number(rec.paidAmount).toLocaleString()}
-                              </span>
+                              <p className="font-bold text-slate-800">{rec.studentName}</p>
+                              <p className="text-slate-500">{rec.area}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => {
-                                setSelectedTutorForSms({
-                                  name: rec.tutorName,
-                                  phone: rec.tutorPhone,
-                                });
-                                setSmsText(
-                                  `আসসালামু আলাইকুম ${rec.tutorName},\nআপনার টিউশন (${rec.tuitionCode}) পেমেন্ট আপডেট: পরিশোধিত ৳${rec.paidAmount}। ধন্যবাদ — Active Tutors`
-                                );
-                              }}
-                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold inline-flex items-center gap-1.5"
-                            >
-                              <Icon name="send" size={12} />
-                              <span>Message</span>
-                            </button>
-                            <button
-                              onClick={() => handleDeletePaymentRecord(rec.id)}
-                              title="Delete Record from Supabase"
-                              className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition inline-flex items-center justify-center"
-                            >
-                              <Icon name="trash" size={14} />
-                            </button>
+                          <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div>
+                                <span className="text-[10px] text-slate-400 font-bold block">
+                                  Fee
+                                </span>
+                                <span className="font-extrabold text-slate-900">
+                                  ৳ {Number(rec.monthlyFee).toLocaleString()}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-400 font-bold block">
+                                  Paid
+                                </span>
+                                <span className="font-extrabold text-emerald-700">
+                                  ৳ {Number(rec.paidAmount).toLocaleString()}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-400 font-bold block">
+                                  Due
+                                </span>
+                                <span
+                                  className={`font-extrabold ${
+                                    recDue > 0 ? 'text-rose-600' : 'text-slate-500'
+                                  }`}
+                                >
+                                  ৳ {recDue.toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  setSelectedTutorForSms({
+                                    name: rec.tutorName,
+                                    phone: rec.tutorPhone,
+                                  });
+                                  setSmsText(
+                                    `আসসালামু আলাইকুম ${rec.tutorName},\nআপনার টিউশন (${rec.tuitionCode}) পেমেন্ট আপডেট: পরিশোধিত ৳${rec.paidAmount}${
+                                      recDue > 0 ? `, বকেয়া (Due): ৳${recDue}` : ''
+                                    }। ধন্যবাদ — Active Tutors`
+                                  );
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold inline-flex items-center gap-1.5"
+                              >
+                                <Icon name="send" size={12} />
+                                <span>Message</span>
+                              </button>
+                              <button
+                                onClick={() => handleDeletePaymentRecord(rec.id)}
+                                title="Delete Record from Supabase"
+                                className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition inline-flex items-center justify-center"
+                              >
+                                <Icon name="trash" size={14} />
+                              </button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               ) : (
@@ -4802,71 +5659,95 @@ export default function App() {
                           <th className="py-3.5 px-4">JOINING DATE</th>
                           <th className="py-3.5 px-4">MONTHLY FEE</th>
                           <th className="py-3.5 px-4">PAID AMOUNT</th>
+                          <th className="py-3.5 px-4">DUE AMOUNT</th>
                           <th className="py-3.5 px-4 text-right">ACTION</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-xs">
                         {filteredPayments.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="py-10 px-4 text-center text-slate-400">
+                            <td colSpan={8} className="py-10 px-4 text-center text-slate-400">
                               No payment records found. Click &quot;Add Record&quot; to add and save in Supabase.
                             </td>
                           </tr>
                         ) : (
-                          filteredPayments.map((rec) => (
-                            <tr key={rec.id} className="hover:bg-slate-50/80">
-                              <td className="py-3.5 px-4 font-extrabold text-slate-900">
-                                <span className="px-2.5 py-1 rounded-lg bg-slate-100">
-                                  {rec.tuitionCode}
-                                </span>
-                              </td>
-                              <td className="py-3.5 px-4">
-                                <p className="font-extrabold text-slate-900">{rec.tutorName}</p>
-                                <p className="text-slate-500 font-mono">{rec.tutorPhone}</p>
-                              </td>
-                              <td className="py-3.5 px-4">
-                                <p className="font-bold text-slate-800">{rec.studentName}</p>
-                                <p className="text-slate-500">{rec.area}</p>
-                              </td>
-                              <td className="py-3.5 px-4 font-semibold text-slate-700">
-                                {rec.joiningDate}
-                              </td>
-                              <td className="py-3.5 px-4 font-extrabold text-slate-900">
-                                ৳ {Number(rec.monthlyFee).toLocaleString()}
-                              </td>
-                              <td className="py-3.5 px-4">
-                                <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 font-extrabold">
-                                  ৳ {Number(rec.paidAmount).toLocaleString()}
-                                </span>
-                              </td>
-                              <td className="py-3.5 px-4 text-right">
-                                <div className="inline-flex items-center justify-end gap-2">
-                                  <button
-                                    onClick={() => {
-                                      setSelectedTutorForSms({
-                                        name: rec.tutorName,
-                                        phone: rec.tutorPhone,
-                                      });
-                                      setSmsText(
-                                        `আসসালামু আলাইকুম ${rec.tutorName},\nআপনার টিউশন (${rec.tuitionCode}) পেমেন্ট আপডেট: পরিশোধিত ৳${rec.paidAmount}। ধন্যবাদ — Active Tutors`
-                                      );
-                                    }}
-                                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold inline-flex items-center gap-1.5"
+                          filteredPayments.map((rec) => {
+                            const recDue = Math.max(
+                              0,
+                              Number(rec.dueAmount) ||
+                                Math.max(
+                                  0,
+                                  (Number(rec.monthlyFee) || 0) - (Number(rec.paidAmount) || 0)
+                                )
+                            );
+                            return (
+                              <tr key={rec.id} className="hover:bg-slate-50/80">
+                                <td className="py-3.5 px-4 font-extrabold text-slate-900">
+                                  <span className="px-2.5 py-1 rounded-lg bg-slate-100">
+                                    {rec.tuitionCode}
+                                  </span>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <p className="font-extrabold text-slate-900">{rec.tutorName}</p>
+                                  <p className="text-slate-500 font-mono">{rec.tutorPhone}</p>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <p className="font-bold text-slate-800">{rec.studentName}</p>
+                                  <p className="text-slate-500">{rec.area}</p>
+                                </td>
+                                <td className="py-3.5 px-4 font-semibold text-slate-700">
+                                  {rec.joiningDate}
+                                </td>
+                                <td className="py-3.5 px-4 font-extrabold text-slate-900">
+                                  ৳ {Number(rec.monthlyFee).toLocaleString()}
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 font-extrabold">
+                                    ৳ {Number(rec.paidAmount).toLocaleString()}
+                                  </span>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <span
+                                    className={`px-2.5 py-1 rounded-lg font-extrabold border ${
+                                      recDue > 0
+                                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                        : 'bg-slate-50 text-slate-500 border-slate-200'
+                                    }`}
                                   >
-                                    <Icon name="send" size={12} />
-                                    <span>Message</span>
-                                  </button>
-                                  <button
-                                    onClick={() => handleDeletePaymentRecord(rec.id)}
-                                    title="Delete Record from Supabase"
-                                    className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition inline-flex items-center justify-center"
-                                  >
-                                    <Icon name="trash" size={14} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))
+                                    ৳ {recDue.toLocaleString()}
+                                  </span>
+                                </td>
+                                <td className="py-3.5 px-4 text-right">
+                                  <div className="inline-flex items-center justify-end gap-2">
+                                    <button
+                                      onClick={() => {
+                                        setSelectedTutorForSms({
+                                          name: rec.tutorName,
+                                          phone: rec.tutorPhone,
+                                        });
+                                        setSmsText(
+                                          `আসসালামু আলাইকুম ${rec.tutorName},\nআপনার টিউশন (${rec.tuitionCode}) পেমেন্ট আপডেট: পরিশোধিত ৳${rec.paidAmount}${
+                                            recDue > 0 ? `, বকেয়া (Due): ৳${recDue}` : ''
+                                          }। ধন্যবাদ — Active Tutors`
+                                        );
+                                      }}
+                                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold inline-flex items-center gap-1.5"
+                                    >
+                                      <Icon name="send" size={12} />
+                                      <span>Message</span>
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeletePaymentRecord(rec.id)}
+                                      title="Delete Record from Supabase"
+                                      className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition inline-flex items-center justify-center"
+                                    >
+                                      <Icon name="trash" size={14} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
                         )}
                       </tbody>
                     </table>
@@ -5328,6 +6209,15 @@ export default function App() {
                     {selectedTutorForProfile.preferredDays || 'Negotiable'}
                   </p>
                 </div>
+
+                <div className="p-3.5 bg-white rounded-xl border border-slate-200 sm:col-span-2">
+                  <p className="text-[10px] text-slate-400 font-bold uppercase">
+                    Education Background (Medium / Version)
+                  </p>
+                  <p className="font-bold text-amber-800 mt-1 text-sm">
+                    {selectedTutorForProfile.educationBackground || 'Bangla Version'}
+                  </p>
+                </div>
               </div>
 
               {selectedTutorForProfile.bio && selectedTutorForProfile.bio.trim() !== '' && (
@@ -5591,6 +6481,23 @@ export default function App() {
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
+                    Select Your Education Background
+                  </label>
+                  <select
+                    value={newTutorForm.educationBackground}
+                    onChange={(e) =>
+                      setNewTutorForm({ ...newTutorForm, educationBackground: e.target.value })
+                    }
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  >
+                    <option value="Bangla Version">Bangla Version / Medium</option>
+                    <option value="English Version">English Version</option>
+                    <option value="English Medium">English Medium (O/A Level)</option>
+                    <option value="Madrasa Medium">Madrasa Medium</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
                     6. Kon kon area te tuitioni korabe
                   </label>
                   <input
@@ -5714,13 +6621,18 @@ export default function App() {
       )}
 
       {/* ==================================================================== */}
-      {/* ADD MANUAL REQUEST MODAL                                             */}
+      {/* ADD MANUAL GUARDIAN REQUEST MODAL (ALL GUARDIAN REQUIREMENTS)        */}
       {/* ==================================================================== */}
       {addRequestModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[92vh] shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
-              <h3 className="font-bold text-base">Add Manual Guardian Request</h3>
+              <div>
+                <h3 className="font-bold text-base">Add Manual Guardian Request</h3>
+                <p className="text-[11px] text-emerald-400 font-medium">
+                  গার্ডিয়ানের সকল রিকোয়ারমেন্ট পূরণ করে সুপাবেসে সেভ করুন
+                </p>
+              </div>
               <button
                 onClick={() => setAddRequestModalOpen(false)}
                 className="text-slate-400 hover:text-white"
@@ -5729,74 +6641,474 @@ export default function App() {
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Tuition Code</label>
-                <input
-                  type="text"
-                  value={newRequestForm.code}
-                  onChange={(e) => setNewRequestForm({ ...newRequestForm, code: e.target.value })}
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
-                />
+            <div className="p-5 overflow-y-auto space-y-4 text-xs">
+              {/* Row 1: Basic Student & Guardian Info */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-extrabold text-slate-700 mb-1">Tuition Code</label>
+                  <input
+                    type="text"
+                    value={newRequestForm.code}
+                    onChange={(e) => setNewRequestForm({ ...newRequestForm, code: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-extrabold text-slate-700 mb-1">
+                    Student Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={newRequestForm.studentName}
+                    onChange={(e) =>
+                      setNewRequestForm({ ...newRequestForm, studentName: e.target.value })
+                    }
+                    placeholder="e.g. Rakib"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-extrabold text-slate-700 mb-1">Guardian Name</label>
+                  <input
+                    type="text"
+                    value={newRequestForm.guardianName}
+                    onChange={(e) =>
+                      setNewRequestForm({ ...newRequestForm, guardianName: e.target.value })
+                    }
+                    placeholder="e.g. Mr. Hasan"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-extrabold text-slate-700 mb-1">
+                    Guardian Contact (Phone)
+                  </label>
+                  <input
+                    type="text"
+                    value={newRequestForm.contact}
+                    onChange={(e) =>
+                      setNewRequestForm({ ...newRequestForm, contact: e.target.value })
+                    }
+                    placeholder="017XXXXXXXX"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Student Name *</label>
-                <input
-                  type="text"
-                  value={newRequestForm.studentName}
-                  onChange={(e) =>
-                    setNewRequestForm({ ...newRequestForm, studentName: e.target.value })
-                  }
-                  placeholder="e.g. Rakib"
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
-                />
+
+              {/* Row 2: Class / Grade, Education Medium & Preferred Gender */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+                <div>
+                  <label className="block font-extrabold text-slate-800 mb-1.5">
+                    Class / Grade
+                  </label>
+                  <select
+                    value={newRequestForm.className}
+                    onChange={(e) =>
+                      setNewRequestForm({ ...newRequestForm, className: e.target.value })
+                    }
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                  >
+                    <option value="All Classes">All Classes</option>
+                    <option value="HSC 1st Year">HSC 1st Year</option>
+                    <option value="HSC 2nd Year">HSC 2nd Year</option>
+                    {CLASSES_LIST.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-extrabold text-slate-800 mb-1.5">
+                    Education Background (Medium)
+                  </label>
+                  <select
+                    value={newRequestForm.educationMedium || 'Any'}
+                    onChange={(e) =>
+                      setNewRequestForm({ ...newRequestForm, educationMedium: e.target.value })
+                    }
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                  >
+                    <option value="Any">All Mediums (Any)</option>
+                    <option value="Bangla Version">Bangla Version / Medium</option>
+                    <option value="English Version">English Version</option>
+                    <option value="English Medium">English Medium (O/A Level)</option>
+                    <option value="Madrasa Medium">Madrasa Medium</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-extrabold text-slate-800 mb-1.5">
+                    Preferred Gender
+                  </label>
+                  <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200/70">
+                    {['Any', 'Male', 'Female'].map((g) => (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() =>
+                          setNewRequestForm({ ...newRequestForm, preferredGender: g })
+                        }
+                        className={`py-2 text-xs font-extrabold rounded-lg transition ${
+                          newRequestForm.preferredGender === g
+                            ? 'bg-white text-emerald-700 shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
+
+              {/* Row 3: Subject Names (Multi-Select) */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Guardian Name</label>
-                <input
-                  type="text"
-                  value={newRequestForm.guardianName}
-                  onChange={(e) =>
-                    setNewRequestForm({ ...newRequestForm, guardianName: e.target.value })
-                  }
-                  placeholder="e.g. Mr. Hasan"
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
-                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="font-extrabold text-slate-800">
+                    Subject Names ({newRequestForm.subjects.length} selected)
+                  </label>
+                  {newRequestForm.subjects.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setNewRequestForm({ ...newRequestForm, subjects: [] })}
+                      className="text-[11px] font-semibold text-slate-400 hover:text-rose-600"
+                    >
+                      Clear All
+                    </button>
+                  )}
+                </div>
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val && !newRequestForm.subjects.includes(val)) {
+                      setNewRequestForm({
+                        ...newRequestForm,
+                        subjects: [...newRequestForm.subjects, val],
+                      });
+                    }
+                    e.target.value = '';
+                  }}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-700"
+                >
+                  <option value="" disabled>
+                    + Add Subject / বিষয় যোগ করুন
+                  </option>
+                  {SUBJECTS_LIST.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+                {newRequestForm.subjects.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {newRequestForm.subjects.map((s) => (
+                      <span
+                        key={s}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-300 text-emerald-700 rounded-full text-xs font-bold"
+                      >
+                        {s}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setNewRequestForm({
+                              ...newRequestForm,
+                              subjects: newRequestForm.subjects.filter((item) => item !== s),
+                            })
+                          }
+                          className="hover:text-rose-600 font-bold"
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Class</label>
-                <input
-                  type="text"
-                  value={newRequestForm.className}
-                  onChange={(e) =>
-                    setNewRequestForm({ ...newRequestForm, className: e.target.value })
-                  }
-                  placeholder="Class 9"
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
-                />
+
+              {/* Row 4: Preferred University & Preferred Department */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-extrabold text-slate-800 mb-1.5">
+                    Preferred University
+                  </label>
+                  <select
+                    value={newRequestForm.preferredVarsity}
+                    onChange={(e) =>
+                      setNewRequestForm({ ...newRequestForm, preferredVarsity: e.target.value })
+                    }
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                  >
+                    <option value="All Universities">All Universities</option>
+                    {uniqueUniversities.map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-extrabold text-slate-800 mb-1.5">
+                    Preferred Department
+                  </label>
+                  <select
+                    value={newRequestForm.preferredDepartment}
+                    onChange={(e) =>
+                      setNewRequestForm({
+                        ...newRequestForm,
+                        preferredDepartment: e.target.value,
+                      })
+                    }
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                  >
+                    <option value="All Departments">All Departments</option>
+                    {uniqueDepartments.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Location</label>
-                <input
-                  type="text"
-                  value={newRequestForm.location}
-                  onChange={(e) =>
-                    setNewRequestForm({ ...newRequestForm, location: e.target.value })
-                  }
-                  placeholder="Dhanmondi (General)"
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
-                />
+
+              {/* Row 5: Tuition Area(s) + Quick Select + Custom Location */}
+              <div className="pt-2 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="font-extrabold text-slate-800">
+                    Tuition Area(s) ({newRequestForm.areas.length} selected)
+                  </label>
+                  {newRequestForm.areas.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setNewRequestForm({ ...newRequestForm, areas: [] })}
+                      className="text-[11px] font-semibold text-slate-400 hover:text-rose-600"
+                    >
+                      Clear All
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <select
+                    defaultValue=""
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val && !newRequestForm.areas.includes(val)) {
+                        setNewRequestForm({
+                          ...newRequestForm,
+                          areas: [...newRequestForm.areas, val],
+                        });
+                      }
+                      e.target.value = '';
+                    }}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-700"
+                  >
+                    <option value="" disabled>
+                      + Add Location / এলাকা যোগ করুন
+                    </option>
+                    {uniqueAreas.map((a) => (
+                      <option key={a} value={a}>
+                        {a}
+                      </option>
+                    ))}
+                  </select>
+
+                  <input
+                    type="text"
+                    value={newRequestForm.location}
+                    onChange={(e) =>
+                      setNewRequestForm({ ...newRequestForm, location: e.target.value })
+                    }
+                    placeholder="Or type custom area (e.g. Dhanmondi 15)"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
+
+                {newRequestForm.areas.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {newRequestForm.areas.map((a) => (
+                      <span
+                        key={a}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 border border-rose-200 text-rose-700 rounded-full text-xs font-bold"
+                      >
+                        <Icon name="mapPin" size={12} />
+                        <span>{a}</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setNewRequestForm({
+                              ...newRequestForm,
+                              areas: newRequestForm.areas.filter((item) => item !== a),
+                            })
+                          }
+                          className="hover:text-rose-900 font-bold"
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="mt-2.5">
+                  <span className="text-[11px] font-bold text-slate-400 block mb-1">
+                    Quick Select:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      'Wari',
+                      'Nazira Bazar',
+                      'Lalbagh',
+                      'Chankharpool',
+                      'Puran Dhaka',
+                      'Dhanmondi Shukrabad',
+                    ].map((loc) => (
+                      <button
+                        key={loc}
+                        type="button"
+                        onClick={() => {
+                          if (!newRequestForm.areas.includes(loc)) {
+                            setNewRequestForm({
+                              ...newRequestForm,
+                              areas: [...newRequestForm.areas, loc],
+                            });
+                          }
+                        }}
+                        className="px-2.5 py-1 bg-slate-50 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 rounded-lg text-[11px] font-semibold transition"
+                      >
+                        + {loc}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
+
+              {/* Row 6: Salary Budget Cap Slider & Presets */}
+              <div className="pt-2 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="font-extrabold text-slate-800">Salary Budget Cap</label>
+                  <span className="text-xs font-mono font-extrabold text-emerald-600">
+                    {Number(newRequestForm.salaryBudgetCap) >= 25000
+                      ? newRequestForm.salary || 'Any Budget (Negotiable)'
+                      : `BDT ${Number(newRequestForm.salaryBudgetCap).toLocaleString()}/mo`}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="2000"
+                  max="25000"
+                  step="500"
+                  value={newRequestForm.salaryBudgetCap}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setNewRequestForm({
+                      ...newRequestForm,
+                      salaryBudgetCap: val,
+                      salary:
+                        val >= 25000 ? 'Negotiable' : `BDT ${val.toLocaleString()}/mo`,
+                    });
+                  }}
+                  className="w-full accent-emerald-600 cursor-pointer"
+                />
+                <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { label: 'Any', val: 25000, text: 'Negotiable' },
+                      { label: '3-5,000', val: 5000, text: '3-5,000' },
+                      { label: '4-7,000', val: 7000, text: '4-7,000' },
+                      { label: '6-10,000', val: 10000, text: '6-10,000' },
+                    ].map((preset) => {
+                      const isActive = newRequestForm.salary === preset.text;
+                      return (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() =>
+                            setNewRequestForm({
+                              ...newRequestForm,
+                              salaryBudgetCap: preset.val,
+                              salary: preset.text,
+                            })
+                          }
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                            isActive
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <input
+                    type="text"
+                    value={newRequestForm.salary}
+                    onChange={(e) =>
+                      setNewRequestForm({ ...newRequestForm, salary: e.target.value })
+                    }
+                    placeholder="Custom Salary (e.g. 8,000 BDT)"
+                    className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-xs w-44"
+                  />
+                </div>
+              </div>
+
+              {/* Row 7: Tuition Type & Preferred Days */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                <div>
+                  <label className="block font-extrabold text-slate-800 mb-1.5">
+                    Tuition Type
+                  </label>
+                  <select
+                    value={newRequestForm.tuitionType}
+                    onChange={(e) =>
+                      setNewRequestForm({ ...newRequestForm, tuitionType: e.target.value })
+                    }
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                  >
+                    <option value="Any">All Types</option>
+                    <option value="Home Tuition">Home Tuition</option>
+                    <option value="Online Tuition">Online Tuition</option>
+                    <option value="Batch Tuition">Batch Tuition</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-extrabold text-slate-800 mb-1.5">
+                    Preferred Days
+                  </label>
+                  <select
+                    value={newRequestForm.preferredDays}
+                    onChange={(e) =>
+                      setNewRequestForm({ ...newRequestForm, preferredDays: e.target.value })
+                    }
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800"
+                  >
+                    <option value="Any">Any Days</option>
+                    <option value="3 Days/Week">3 Days/Week</option>
+                    <option value="4 Days/Week">4 Days/Week</option>
+                    <option value="5 Days/Week">5 Days/Week</option>
+                    <option value="6 Days/Week">6 Days/Week</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Row 8: Special Notes / Extra Requirements */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Guardian Contact</label>
+                <label className="block font-extrabold text-slate-800 mb-1.5">
+                  Special Notes / Extra Requirements (ঐচ্ছিক)
+                </label>
                 <input
                   type="text"
-                  value={newRequestForm.contact}
+                  value={newRequestForm.notes}
                   onChange={(e) =>
-                    setNewRequestForm({ ...newRequestForm, contact: e.target.value })
+                    setNewRequestForm({ ...newRequestForm, notes: e.target.value })
                   }
-                  placeholder="017XXXXXXXX"
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  placeholder="e.g. Experienced female tutor needed, evening time preferred..."
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium"
                 />
               </div>
             </div>
