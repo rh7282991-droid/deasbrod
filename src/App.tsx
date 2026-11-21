@@ -3918,17 +3918,28 @@ export default function App() {
               >
                 <Icon name="menu" size={18} />
               </button>
-              <div className="h-8 w-8 rounded-xl bg-emerald-500 flex items-center justify-center text-slate-950 font-black shadow-md shadow-emerald-500/20 flex-shrink-0">
-                <Icon name="graduationCap" size={18} />
-              </div>
-              <div className="leading-tight min-w-0">
-                <h1 className="font-extrabold text-sm tracking-tight truncate">
-                  Active <span className="text-emerald-400">Tutors</span>
-                </h1>
-                <p className="text-[9px] text-slate-400 font-semibold tracking-wider uppercase truncate">
-                  {lastSheetSyncTime ? `Synced: ${lastSheetSyncTime}` : 'Tuition Management'}
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('find');
+                  setSearchQuery('');
+                  setIsMobileMenuOpen(false);
+                }}
+                title="Go to Home (Find Tutors)"
+                className="flex items-center gap-2 min-w-0 text-left cursor-pointer hover:opacity-90 transition"
+              >
+                <div className="h-8 w-8 rounded-xl bg-emerald-500 flex items-center justify-center text-slate-950 font-black shadow-md shadow-emerald-500/20 flex-shrink-0">
+                  <Icon name="graduationCap" size={18} />
+                </div>
+                <div className="leading-tight min-w-0">
+                  <h1 className="font-extrabold text-sm tracking-tight truncate">
+                    Active <span className="text-emerald-400">Tutors</span>
+                  </h1>
+                  <p className="text-[9px] text-slate-400 font-semibold tracking-wider uppercase truncate">
+                    {lastSheetSyncTime ? `Synced: ${lastSheetSyncTime}` : 'Tuition Management'}
+                  </p>
+                </div>
+              </button>
             </div>
 
             <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -3983,13 +3994,22 @@ export default function App() {
           <div>
             {/* Brand Header + Slide Toggle Button */}
             <div className="p-4 flex items-center justify-between border-b border-slate-800/80">
-              <div className="flex items-center gap-3 overflow-hidden">
-                <div className="h-10 w-10 rounded-xl bg-emerald-500 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-emerald-500/20 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('find');
+                  setSearchQuery('');
+                  setIsMobileMenuOpen(false);
+                }}
+                title="Go to Home Page (Find Tutors)"
+                className="flex items-center gap-3 overflow-hidden text-left cursor-pointer group hover:opacity-95 transition"
+              >
+                <div className="h-10 w-10 rounded-xl bg-emerald-500 group-hover:bg-emerald-400 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-emerald-500/20 flex-shrink-0 transition">
                   <Icon name="graduationCap" size={22} />
                 </div>
                 {(!isSidebarCollapsed || isMobileView) && (
                   <div className="leading-tight truncate">
-                    <h1 className="font-extrabold text-base tracking-tight">
+                    <h1 className="font-extrabold text-base tracking-tight text-white group-hover:text-emerald-300 transition">
                       Active <span className="text-emerald-400">Tutors</span>
                     </h1>
                     <p className="text-[10px] text-slate-400 font-semibold tracking-widest uppercase">
@@ -3997,7 +4017,7 @@ export default function App() {
                     </p>
                   </div>
                 )}
-              </div>
+              </button>
 
               {/* CLOSE DRAWER ON MOBILE / SLIDE BUTTON ON TABLET & LAPTOP */}
               <button
@@ -7503,22 +7523,17 @@ export default function App() {
       )}
 
       {/* ==================================================================== */}
-      {/* ADD / EDIT PAYMENT RECORD MODAL (COMPLETE STUDENT & TUTOR HISAB)     */}
+      {/* ADD / EDIT PAYMENT RECORD MODAL (SIMPLE & CLEAN)                     */}
       {/* ==================================================================== */}
       {addPaymentModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[92vh] shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
-            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-base">
-                  {editingPaymentId !== null
-                    ? 'Update Payment Ledger Record'
-                    : 'Add Payment Ledger Record (Student & Tutor হিসাব)'}
-                </h3>
-                <p className="text-[11px] text-emerald-400 font-medium mt-0.5">
-                  একজন স্টুডেন্ট ও টিউটরের সম্পূর্ণ টিউশন ও পেমেন্টের হিসাব সুপাবেসে সংরক্ষণ করুন
-                </p>
-              </div>
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="p-4 sm:p-5 bg-slate-900 text-white flex items-center justify-between">
+              <h3 className="font-bold text-base">
+                {editingPaymentId !== null
+                  ? 'Update Payment Record'
+                  : 'Add Payment Ledger Record'}
+              </h3>
               <button
                 onClick={() => {
                   setAddPaymentModalOpen(false);
@@ -7530,486 +7545,155 @@ export default function App() {
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto space-y-4 text-xs">
-              {/* Quick Autofill from Existing Guardian Requests or Tutor Pool */}
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="p-5 space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-extrabold text-slate-600 mb-1">
-                    Quick Fill from Guardian Request (ঐচ্ছিক)
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Tuition Code
                   </label>
-                  <select
-                    defaultValue=""
-                    onChange={(e) => {
-                      const req = tuitionRequests.find((r) => String(r.code) === e.target.value);
-                      if (req) {
-                        const salBounds = parseSalaryRangeBounds(req.salary, 0);
-                        const estFee = salBounds.hasSalary ? salBounds.max : 8000;
-                        const pct = sanitizeNumber(newPaymentForm.commissionPercentage, 100);
-                        setNewPaymentForm((prev) => ({
-                          ...prev,
-                          tuitionCode: req.code,
-                          studentName: req.studentName,
-                          guardianName: req.guardianName,
-                          guardianPhone: req.contact !== 'Not Provided' ? req.contact : '',
-                          studentClass: req.className || 'Class 9',
-                          educationMedium:
-                            req.educationMedium && req.educationMedium !== 'Any'
-                              ? req.educationMedium
-                              : 'Bangla Medium',
-                          subjects: (req.subjects || []).join(', '),
-                          area:
-                            req.areas && req.areas.length > 0
-                              ? req.areas.join(', ')
-                              : req.location,
-                          monthlyFee: estFee,
-                          payableAmount: Math.round((estFee * pct) / 100),
-                        }));
-                      }
-                      e.target.value = '';
-                    }}
-                    className="w-full p-2 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
-                  >
-                    <option value="">-- গার্ডিয়ান রিকোয়েস্ট থেকে স্টুডেন্ট সিলেক্ট করুন --</option>
-                    {tuitionRequests.map((r) => (
-                      <option key={r.id} value={r.code}>
-                        {r.code} — {r.studentName} ({r.className}, {r.location})
-                      </option>
-                    ))}
-                  </select>
+                  <input
+                    type="text"
+                    value={newPaymentForm.tuitionCode}
+                    onChange={(e) =>
+                      setNewPaymentForm({ ...newPaymentForm, tuitionCode: e.target.value })
+                    }
+                    placeholder="e.g. AT9832"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
                 </div>
-
                 <div>
-                  <label className="block text-[11px] font-extrabold text-slate-600 mb-1">
-                    Quick Fill Tutor from Tutor Pool (ঐচ্ছিক)
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Joining Date
                   </label>
-                  <select
-                    defaultValue=""
-                    onChange={(e) => {
-                      const chosenTutor = tutors.find(
-                        (t) => String(t.id) === e.target.value
-                      );
-                      if (chosenTutor) {
-                        setNewPaymentForm((prev) => ({
-                          ...prev,
-                          tutorName: chosenTutor.name,
-                          tutorPhone: chosenTutor.phone,
-                          tutorUniversity: `${chosenTutor.university}${
-                            chosenTutor.department &&
-                            chosenTutor.department !== 'Not Specified'
-                              ? ` (${chosenTutor.department})`
-                              : ''
-                          }`,
-                        }));
-                      }
-                      e.target.value = '';
-                    }}
-                    className="w-full p-2 bg-white border border-slate-200 rounded-xl font-semibold text-slate-700"
+                  <input
+                    type="date"
+                    value={newPaymentForm.joiningDate}
+                    onChange={(e) =>
+                      setNewPaymentForm({ ...newPaymentForm, joiningDate: e.target.value })
+                    }
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Tutor Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={newPaymentForm.tutorName}
+                    onChange={(e) =>
+                      setNewPaymentForm({ ...newPaymentForm, tutorName: e.target.value })
+                    }
+                    placeholder="e.g. Mizanur Rahman"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Tutor Phone *
+                  </label>
+                  <input
+                    type="text"
+                    value={newPaymentForm.tutorPhone}
+                    onChange={(e) =>
+                      setNewPaymentForm({ ...newPaymentForm, tutorPhone: e.target.value })
+                    }
+                    placeholder="017XXXXXXXX"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Student Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newPaymentForm.studentName}
+                    onChange={(e) =>
+                      setNewPaymentForm({ ...newPaymentForm, studentName: e.target.value })
+                    }
+                    placeholder="e.g. Rakib"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Location / Area
+                  </label>
+                  <input
+                    type="text"
+                    value={newPaymentForm.area}
+                    onChange={(e) =>
+                      setNewPaymentForm({ ...newPaymentForm, area: e.target.value })
+                    }
+                    placeholder="e.g. Dhanmondi"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Monthly Fee (BDT)
+                  </label>
+                  <input
+                    type="number"
+                    value={newPaymentForm.monthlyFee}
+                    onChange={(e) =>
+                      setNewPaymentForm({
+                        ...newPaymentForm,
+                        monthlyFee: e.target.value,
+                        payableAmount: sanitizeNumber(e.target.value, 0),
+                      })
+                    }
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-extrabold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-emerald-700 mb-1">
+                    Paid Amount (BDT)
+                  </label>
+                  <input
+                    type="number"
+                    value={newPaymentForm.paidAmount}
+                    onChange={(e) =>
+                      setNewPaymentForm({ ...newPaymentForm, paidAmount: e.target.value })
+                    }
+                    className="w-full p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800"
+                  />
+                </div>
+              </div>
+
+              {/* Simple Live Due Display */}
+              {(() => {
+                const feeNum = sanitizeNumber(newPaymentForm.monthlyFee, 0);
+                const paidNum = sanitizeNumber(newPaymentForm.paidAmount, 0);
+                const dueNum = Math.max(0, feeNum - paidNum);
+                return (
+                  <div
+                    className={`p-3 rounded-xl border flex items-center justify-between ${
+                      dueNum > 0
+                        ? 'bg-rose-50 border-rose-200 text-rose-800'
+                        : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    }`}
                   >
-                    <option value="">-- টিউটর তালিকা থেকে টিউটর সিলেক্ট করুন --</option>
-                    {tutors.slice(0, 150).map((t) => (
-                      <option key={t.id} value={String(t.id)}>
-                        {t.name} — {t.phone} ({t.university})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Section 1: Tuition & Student / Guardian Information */}
-              <div>
-                <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-700 mb-2.5 flex items-center gap-1.5">
-                  <Icon name="users" size={13} />
-                  <span>১. স্টুডেন্ট ও গার্ডিয়ানের তথ্য (Student &amp; Tuition Info)</span>
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Tuition Code *
-                    </label>
-                    <input
-                      type="text"
-                      value={newPaymentForm.tuitionCode}
-                      onChange={(e) =>
-                        setNewPaymentForm({ ...newPaymentForm, tuitionCode: e.target.value })
-                      }
-                      placeholder="e.g. AT9832"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Student Name (ছাত্র/ছাত্রীর নাম) *
-                    </label>
-                    <input
-                      type="text"
-                      value={newPaymentForm.studentName}
-                      onChange={(e) =>
-                        setNewPaymentForm({ ...newPaymentForm, studentName: e.target.value })
-                      }
-                      placeholder="e.g. Rakib"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Guardian Name (অভিভাবকের নাম)
-                    </label>
-                    <input
-                      type="text"
-                      value={newPaymentForm.guardianName}
-                      onChange={(e) =>
-                        setNewPaymentForm({ ...newPaymentForm, guardianName: e.target.value })
-                      }
-                      placeholder="e.g. Mr. Hasan"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Guardian Phone (অভিভাবকের ফোন)
-                    </label>
-                    <input
-                      type="text"
-                      value={newPaymentForm.guardianPhone}
-                      onChange={(e) =>
-                        setNewPaymentForm({ ...newPaymentForm, guardianPhone: e.target.value })
-                      }
-                      placeholder="017XXXXXXXX"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Student Class (ক্লাস)
-                    </label>
-                    <select
-                      value={newPaymentForm.studentClass}
-                      onChange={(e) =>
-                        setNewPaymentForm({ ...newPaymentForm, studentClass: e.target.value })
-                      }
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-                    >
-                      <option value="HSC 1st Year">HSC 1st Year</option>
-                      <option value="HSC 2nd Year">HSC 2nd Year</option>
-                      {CLASSES_LIST.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Medium / Version (মিডিয়াম)
-                    </label>
-                    <select
-                      value={newPaymentForm.educationMedium}
-                      onChange={(e) =>
-                        setNewPaymentForm({
-                          ...newPaymentForm,
-                          educationMedium: e.target.value,
-                        })
-                      }
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-                    >
-                      <option value="Bangla Medium">Bangla Medium / Version</option>
-                      <option value="English Version">English Version</option>
-                      <option value="O/A Level (English Medium)">
-                        English Medium (O/A Level)
-                      </option>
-                      <option value="Madrasa Medium">Madrasa Medium</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Tuition Area / Location (এলাকা) *
-                    </label>
-                    <input
-                      type="text"
-                      value={newPaymentForm.area}
-                      onChange={(e) =>
-                        setNewPaymentForm({ ...newPaymentForm, area: e.target.value })
-                      }
-                      placeholder="e.g. Dhanmondi 15"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Subjects (বিষয়সমূহ)
-                    </label>
-                    <input
-                      type="text"
-                      value={newPaymentForm.subjects}
-                      onChange={(e) =>
-                        setNewPaymentForm({ ...newPaymentForm, subjects: e.target.value })
-                      }
-                      placeholder="e.g. Math, Physics, English"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Joining Date (শুরুর তারিখ) *
-                    </label>
-                    <input
-                      type="date"
-                      value={newPaymentForm.joiningDate}
-                      onChange={(e) =>
-                        setNewPaymentForm({ ...newPaymentForm, joiningDate: e.target.value })
-                      }
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Section 2: Assigned Tutor Information */}
-              <div className="pt-3 border-t border-slate-100">
-                <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-indigo-700 mb-2.5 flex items-center gap-1.5">
-                  <Icon name="graduationCap" size={14} />
-                  <span>২. টিউটরের তথ্য (Assigned Tutor Info)</span>
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Tutor Name (টিউটরের নাম) *
-                    </label>
-                    <input
-                      type="text"
-                      value={newPaymentForm.tutorName}
-                      onChange={(e) =>
-                        setNewPaymentForm({ ...newPaymentForm, tutorName: e.target.value })
-                      }
-                      placeholder="e.g. Mizanur Rahman"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Tutor Phone (টিউটরের ফোন) *
-                    </label>
-                    <input
-                      type="text"
-                      value={newPaymentForm.tutorPhone}
-                      onChange={(e) =>
-                        setNewPaymentForm({ ...newPaymentForm, tutorPhone: e.target.value })
-                      }
-                      placeholder="017XXXXXXXX"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Tutor University &amp; Dept
-                    </label>
-                    <input
-                      type="text"
-                      value={newPaymentForm.tutorUniversity}
-                      onChange={(e) =>
-                        setNewPaymentForm({
-                          ...newPaymentForm,
-                          tutorUniversity: e.target.value,
-                        })
-                      }
-                      placeholder="e.g. Dhaka University (Physics)"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Section 3: Financial & Media Fee Accounting (হিসাব-নিকাশ) */}
-              <div className="pt-3 border-t border-slate-100">
-                <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-rose-700 mb-2.5 flex items-center gap-1.5">
-                  <Icon name="zap" size={14} />
-                  <span>৩. টাকা ও বকেয়া হিসাব (Payment &amp; Due Accounting)</span>
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Monthly Salary / Fee (BDT)
-                    </label>
-                    <input
-                      type="number"
-                      value={newPaymentForm.monthlyFee}
-                      onChange={(e) => {
-                        const feeVal = sanitizeNumber(e.target.value, 0);
-                        const pctVal = sanitizeNumber(
-                          newPaymentForm.commissionPercentage,
-                          100
-                        );
-                        setNewPaymentForm({
-                          ...newPaymentForm,
-                          monthlyFee: e.target.value,
-                          payableAmount: Math.round((feeVal * pctVal) / 100),
-                        });
-                      }}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-extrabold text-slate-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Media Fee / Commission (%)
-                    </label>
-                    <div className="flex items-center gap-1">
-                      <select
-                        value={String(newPaymentForm.commissionPercentage)}
-                        onChange={(e) => {
-                          const pctVal = sanitizeNumber(e.target.value, 100);
-                          const feeVal = sanitizeNumber(newPaymentForm.monthlyFee, 0);
-                          setNewPaymentForm({
-                            ...newPaymentForm,
-                            commissionPercentage: pctVal,
-                            payableAmount: Math.round((feeVal * pctVal) / 100),
-                          });
-                        }}
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                      >
-                        <option value="100">100% (Full Month)</option>
-                        <option value="60">60% Media Fee</option>
-                        <option value="50">50% Media Fee</option>
-                        <option value="40">40% Media Fee</option>
-                        <option value="30">30% Media Fee</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Net Payable Fee (মোট প্রাপ্য)
-                    </label>
-                    <input
-                      type="number"
-                      value={newPaymentForm.payableAmount}
-                      onChange={(e) =>
-                        setNewPaymentForm({
-                          ...newPaymentForm,
-                          payableAmount: e.target.value,
-                        })
-                      }
-                      className="w-full p-2.5 bg-indigo-50/70 border border-indigo-200 rounded-xl font-extrabold text-indigo-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-emerald-700 mb-1">
-                      Paid Amount (জমা দিয়েছে) *
-                    </label>
-                    <input
-                      type="number"
-                      value={newPaymentForm.paidAmount}
-                      onChange={(e) =>
-                        setNewPaymentForm({ ...newPaymentForm, paidAmount: e.target.value })
-                      }
-                      className="w-full p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800"
-                    />
-                  </div>
-                </div>
-
-                {/* Live Calculated Due & Status Banner */}
-                {(() => {
-                  const payableNum = sanitizeNumber(
-                    newPaymentForm.payableAmount,
-                    sanitizeNumber(newPaymentForm.monthlyFee, 0)
-                  );
-                  const paidNum = sanitizeNumber(newPaymentForm.paidAmount, 0);
-                  const dueNum = Math.max(0, payableNum - paidNum);
-                  return (
-                    <div
-                      className={`mt-3 p-3.5 rounded-2xl border flex flex-wrap items-center justify-between gap-2 ${
-                        dueNum > 0
-                          ? 'bg-rose-50 border-rose-200 text-rose-900'
-                          : 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div>
-                          <span className="text-[10px] font-extrabold uppercase block opacity-75">
-                            মোট প্রাপ্য (Payable)
-                          </span>
-                          <span className="text-sm font-black">
-                            ৳ {payableNum.toLocaleString()}
-                          </span>
-                        </div>
-                        <span className="text-slate-300 font-bold">−</span>
-                        <div>
-                          <span className="text-[10px] font-extrabold uppercase block opacity-75">
-                            পরিশোধিত (Paid)
-                          </span>
-                          <span className="text-sm font-black text-emerald-700">
-                            ৳ {paidNum.toLocaleString()}
-                          </span>
-                        </div>
-                        <span className="text-slate-300 font-bold">=</span>
-                        <div>
-                          <span className="text-[10px] font-extrabold uppercase block opacity-75">
-                            বকেয়া (Due Amount)
-                          </span>
-                          <span
-                            className={`text-base font-black ${
-                              dueNum > 0 ? 'text-rose-600' : 'text-emerald-700'
-                            }`}
-                          >
-                            ৳ {dueNum.toLocaleString()}
-                          </span>
-                        </div>
-                      </div>
-
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-extrabold ${
-                          dueNum > 0
-                            ? 'bg-rose-600 text-white'
-                            : 'bg-emerald-600 text-white'
-                        }`}
-                      >
-                        {dueNum > 0 ? `Pending Due (বকেয়া আছে)` : 'Fully Paid (পরিশোধিত)'}
+                    <span className="font-bold">Due Amount (বকেয়া টাকা):</span>
+                    <span className="text-sm font-black">
+                      ৳ {dueNum.toLocaleString()}{' '}
+                      <span className="text-[11px] font-bold">
+                        ({dueNum > 0 ? 'Pending Due' : 'Fully Paid'})
                       </span>
-                    </div>
-                  );
-                })()}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      Payment Method (পেমেন্ট মাধ্যম)
-                    </label>
-                    <select
-                      value={newPaymentForm.paymentMethod}
-                      onChange={(e) =>
-                        setNewPaymentForm({
-                          ...newPaymentForm,
-                          paymentMethod: e.target.value,
-                        })
-                      }
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold"
-                    >
-                      <option value="bKash">bKash (বিকাশ)</option>
-                      <option value="Nagad">Nagad (নগদ)</option>
-                      <option value="Rocket">Rocket (রকেট)</option>
-                      <option value="Cash">Cash (ক্যাশ)</option>
-                      <option value="Bank Transfer">Bank Transfer (ব্যাংক)</option>
-                    </select>
+                    </span>
                   </div>
-
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">
-                      TrxID / Note / পরবর্তী কিস্তির তারিখ (ঐচ্ছিক)
-                    </label>
-                    <input
-                      type="text"
-                      value={newPaymentForm.paymentNote}
-                      onChange={(e) =>
-                        setNewPaymentForm({ ...newPaymentForm, paymentNote: e.target.value })
-                      }
-                      placeholder="e.g. TrxID: 9H7K2L বা ১০ তারিখে বাকি টাকা দিবে"
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium"
-                    />
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
             </div>
 
             <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
@@ -8024,7 +7708,7 @@ export default function App() {
               </button>
               <button
                 onClick={handleAddPaymentRecord}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold shadow-sm"
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm"
               >
                 {editingPaymentId !== null ? 'Update Record' : 'Save Record'}
               </button>
