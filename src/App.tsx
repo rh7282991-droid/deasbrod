@@ -11,6 +11,7 @@ const HARDCODED_MASTER_CONFIG = {
     tableName: 'tutors',
     requestsTableName: 'guardian_requests',
     paymentsTableName: 'payments_ledger',
+    assignedTeachersTableName: 'assigned_teachers',
     settingsTableName: 'app_settings',
   },
   wasender: {
@@ -1772,9 +1773,9 @@ const matchesCatalogFilter = (
 // MAIN APP COMPONENT
 // ============================================================================
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'find' | 'requests' | 'payments' | 'pool' | 'settings'>(
-    'find'
-  );
+  const [activeTab, setActiveTab] = useState<
+    'find' | 'requests' | 'assigned' | 'payments' | 'pool' | 'settings'
+  >('find');
   const detectDeviceType = useCallback((): 'mobile' | 'tablet' | 'laptop' => {
     if (typeof window === 'undefined') return 'laptop';
     const width = window.innerWidth;
@@ -2616,13 +2617,38 @@ export default function App() {
       const client = getSupabaseClient();
       if (!client) return;
       try {
-        const { data, error } = await client
-          .from(supabaseConfig.paymentsTableName)
-          .select('*')
-          .order('id', { ascending: false });
-        if (!error && Array.isArray(data)) {
+        const [{ data: ledgerData, error: ledgerErr }, { data: assignedData }] =
+          await Promise.all([
+            client
+              .from(supabaseConfig.paymentsTableName)
+              .select('*')
+              .order('id', { ascending: false }),
+            client
+              .from('assigned_teachers')
+              .select('*')
+              .order('id', { ascending: false }),
+          ]);
+
+        // Merge rows from payments_ledger and assigned_teachers by id or code+tutorPhone
+        const combinedRows: Array<Record<string, unknown>> = [];
+        const seenKeys = new Set<string>();
+
+        const sourceRows = [
+          ...(Array.isArray(assignedData) ? assignedData : []),
+          ...(Array.isArray(ledgerData) ? ledgerData : []),
+        ];
+
+        for (const row of sourceRows) {
+          const key = `${row.id || ''}_${row.code || ''}_${row.tutorPhone || ''}`;
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            combinedRows.push(row);
+          }
+        }
+
+        if (!ledgerErr || Array.isArray(assignedData)) {
           setPaymentRecords(
-            data.map((p: Record<string, unknown>) => {
+            combinedRows.map((p: Record<string, unknown>) => {
               const fee = sanitizeNumber(p.monthlyFee ?? p.monthly_fee, 0);
               const paid = sanitizeNumber(p.paidAmount ?? p.paid_amount, 0);
               const rawDue = p.dueAmount ?? p.due_amount;
@@ -2684,7 +2710,7 @@ export default function App() {
             })
           );
         }
-        if (!silent) triggerToast('Payments Ledger refreshed from Supabase!');
+        if (!silent) triggerToast('Assigned Teachers & Payments Ledger synced from Supabase!');
       } catch {
         // ignore table missing fallback
       }
@@ -3129,20 +3155,34 @@ export default function App() {
     const client = getSupabaseClient();
     if (client) {
       if (editingPaymentId !== null) {
-        const { error } = await client
-          .from(supabaseConfig.paymentsTableName)
-          .update(dbPayload)
-          .eq('id', editingPaymentId);
-        if (error) {
-          triggerToast(`Supabase Update Error: ${error.message}`);
+        const [{ error: err1 }, { error: err2 }] = await Promise.all([
+          client
+            .from(supabaseConfig.paymentsTableName)
+            .update(dbPayload)
+            .eq('id', editingPaymentId),
+          client
+            .from('assigned_teachers')
+            .update(dbPayload)
+            .eq('id', editingPaymentId),
+        ]);
+        if (err1 && err2) {
+          triggerToast(`Supabase Update Error: ${err1.message}`);
           return;
         }
       } else {
-        const { error } = await client
+        const { data: insertedRows, error: err1 } = await client
           .from(supabaseConfig.paymentsTableName)
-          .insert([dbPayload]);
-        if (error) {
-          triggerToast(`Supabase Save Error: ${error.message}`);
+          .insert([dbPayload])
+          .select();
+        const payloadWithId =
+          Array.isArray(insertedRows) && insertedRows[0]?.id
+            ? { ...dbPayload, id: insertedRows[0].id }
+            : dbPayload;
+        const { error: err2 } = await client
+          .from('assigned_teachers')
+          .upsert([payloadWithId]);
+        if (err1 && err2) {
+          triggerToast(`Supabase Save Error: ${err1.message}`);
           return;
         }
       }
@@ -3187,27 +3227,27 @@ export default function App() {
     setAddPaymentModalOpen(false);
     triggerToast(
       editingPaymentId !== null
-        ? 'পেমেন্ট রেকর্ড সুপাবেসে আপডেট হয়েছে!'
-        : 'পেমেন্ট রেকর্ড সুপাবেসে সংরক্ষিত হয়েছে!'
+        ? 'রেকর্ড সুপাবেসে (assigned_teachers ও payments_ledger) আপডেট হয়েছে!'
+        : 'টিচার ও পেমেন্ট রেকর্ড সুপাবেসে সংরক্ষিত হয়েছে!'
     );
   };
 
-  // Delete Payment Record Handler (Deletes directly from Supabase payments_ledger)
+  // Delete Payment Record Handler (Deletes directly from Supabase assigned_teachers & payments_ledger)
   const handleDeletePaymentRecord = async (recId: number | string) => {
     setPaymentRecords((prev) => prev.filter((p) => p.id !== recId));
     const client = getSupabaseClient();
     if (client) {
-      const { error } = await client
-        .from(supabaseConfig.paymentsTableName)
-        .delete()
-        .eq('id', recId);
-      if (error) {
-        triggerToast(`Supabase Delete Error: ${error.message}`);
+      const [{ error: err1 }, { error: err2 }] = await Promise.all([
+        client.from(supabaseConfig.paymentsTableName).delete().eq('id', recId),
+        client.from('assigned_teachers').delete().eq('id', recId),
+      ]);
+      if (err1 && err2) {
+        triggerToast(`Supabase Delete Error: ${err1.message}`);
         return;
       }
       await fetchPaymentsFromSupabase(true);
     }
-    triggerToast('পেমেন্ট রেকর্ড সুপাবেস থেকে মুছে ফেলা হয়েছে!');
+    triggerToast('রেকর্ড সুপাবেস থেকে মুছে ফেলা হয়েছে!');
   };
 
   // Delete Tutor from Supabase & Dashboard
@@ -4101,6 +4141,38 @@ export default function App() {
 
               <button
                 onClick={() => {
+                  setActiveTab('assigned');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center ${
+                  isSidebarCollapsed && !isMobileView
+                    ? 'justify-center px-2'
+                    : 'justify-between px-3.5'
+                } py-3 rounded-xl transition-all ${
+                  activeTab === 'assigned'
+                    ? 'bg-emerald-500 text-slate-950 font-bold shadow-lg shadow-emerald-500/20'
+                    : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Icon name="graduationCap" size={18} />
+                  {(!isSidebarCollapsed || isMobileView) && <span>Assigned Teachers</span>}
+                </div>
+                {(!isSidebarCollapsed || isMobileView) && (
+                  <span
+                    className={`px-2 py-0.5 text-[10px] rounded-md font-extrabold ${
+                      activeTab === 'assigned'
+                        ? 'bg-slate-900/20 text-slate-950'
+                        : 'bg-emerald-500/20 text-emerald-300'
+                    }`}
+                  >
+                    {paymentRecords.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => {
                   setActiveTab('payments');
                   setIsMobileMenuOpen(false);
                 }}
@@ -4546,6 +4618,79 @@ export default function App() {
                     <span>Add Record</span>
                   </button>
                 )}
+              </div>
+            </header>
+          )}
+
+          {/* Top Bar for Assigned Teachers (যারা টিউশন পেয়েছে) */}
+          {activeTab === 'assigned' && (
+            <header
+              className={`bg-white border-b border-slate-200 px-3 sm:px-5 py-3 flex ${
+                isMobileView
+                  ? 'flex-col gap-2.5'
+                  : 'flex-row items-center justify-between gap-2.5'
+              } flex-shrink-0`}
+            >
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
+                    Assigned Teachers (যারা টিউশন পেয়েছে)
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    Total: {paymentRecords.length} Teachers
+                  </span>
+                </div>
+                {!isMobileView && (
+                  <p className="text-xs text-slate-500">
+                    যারা টিউশন পেয়েছে সেই সকল টিচারের তালিকা, টিউশন কোড, স্টুডেন্ট, লোকেশন ও পেমেন্ট আপডেট
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => fetchPaymentsFromSupabase(false)}
+                  className="px-3 py-1.5 text-xs font-bold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-full flex items-center gap-1.5 shadow-sm transition"
+                >
+                  <Icon name="refresh" size={13} />
+                  <span>Refresh</span>
+                </button>
+
+                <div className={`relative ${isMobileView ? 'flex-1' : 'w-56'}`}>
+                  <Icon
+                    name="search"
+                    size={15}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search teacher, phone, code..."
+                    className="pl-9 pr-7 py-2 text-xs bg-slate-50 border border-slate-200 rounded-full focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full"
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                    >
+                      <Icon name="x" size={13} />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => {
+                    setEditingPaymentId(null);
+                    setNewPaymentForm(initialPaymentForm);
+                    setAddPaymentModalOpen(true);
+                  }}
+                  className="px-3.5 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-full flex items-center gap-1.5 shadow-sm transition whitespace-nowrap"
+                >
+                  <Icon name="userPlus" size={14} />
+                  <span>+ Add Teacher</span>
+                </button>
               </div>
             </header>
           )}
@@ -5294,16 +5439,48 @@ export default function App() {
                         <span className="px-2.5 py-1 bg-slate-100 rounded-lg text-xs font-mono font-bold text-slate-800">
                           📞 {tutor.phone}
                         </span>
-                        <div className="flex items-center gap-2 ml-auto">
+                        <div className="flex items-center gap-1.5 ml-auto">
                           <button
                             onClick={() => setSelectedTutorForProfile(tutor)}
-                            className="px-3 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition"
+                            className="px-2.5 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition"
                           >
                             Profile
                           </button>
                           <button
+                            onClick={() => {
+                              setEditingPaymentId(null);
+                              setNewPaymentForm({
+                                ...initialPaymentForm,
+                                tuitionCode:
+                                  appliedRequirements.batchCode ||
+                                  `AT${Math.floor(1000 + Math.random() * 9000)}`,
+                                tutorName: tutor.name,
+                                tutorPhone: tutor.phone,
+                                tutorUniversity: `${tutor.university}${
+                                  tutor.department && tutor.department !== 'Not Specified'
+                                    ? ` (${tutor.department})`
+                                    : ''
+                                }`,
+                                studentName:
+                                  appliedRequirements.guardianName &&
+                                  appliedRequirements.guardianName !== 'Mr. Hasan'
+                                    ? appliedRequirements.guardianName
+                                    : '',
+                                area:
+                                  appliedRequirements.selectedAreas.length > 0
+                                    ? appliedRequirements.selectedAreas.join(', ')
+                                    : (tutor.preferredAreas && tutor.preferredAreas[0]) || 'Dhaka',
+                              });
+                              setAddPaymentModalOpen(true);
+                            }}
+                            title="Assign Tuition to this Teacher"
+                            className="px-2.5 py-1.5 text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl transition"
+                          >
+                            ✓ Assign
+                          </button>
+                          <button
                             onClick={() => handleOpenSingleSms(tutor)}
-                            className="px-3.5 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl flex items-center gap-1.5 shadow-sm transition"
+                            className="px-3 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl flex items-center gap-1.5 shadow-sm transition"
                           >
                             <Icon name="send" size={13} />
                             <span>Send Offer</span>
@@ -6142,6 +6319,365 @@ export default function App() {
             </div>
           )}
 
+          {/* TAB: ASSIGNED TEACHERS (যারা টিউশন পেয়েছে) */}
+          {activeTab === 'assigned' && (
+            <div className={`flex-1 ${isMobileView ? '' : 'overflow-y-auto'} p-3 sm:p-5 space-y-4`}>
+              {/* Summary Cards for Assigned Teachers */}
+              <div
+                className={`grid ${
+                  isMobileView ? 'grid-cols-2' : 'grid-cols-2 xl:grid-cols-4'
+                } gap-3.5`}
+              >
+                <div className="bg-white rounded-3xl border border-slate-200/80 p-4 sm:p-5 shadow-sm flex items-start justify-between">
+                  <div>
+                    <span className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                      ASSIGNED TEACHERS
+                    </span>
+                    <div className="mt-1.5 flex items-baseline gap-1.5">
+                      <span className="text-2xl sm:text-3xl font-black text-slate-900">
+                        {paymentRecords.length}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-500">Teachers</span>
+                    </div>
+                    <p className="mt-1.5 text-[11px] font-bold text-emerald-600">
+                      যারা টিউশন পেয়েছে
+                    </p>
+                  </div>
+                  <div className="h-10 w-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                    <Icon name="graduationCap" size={19} />
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-3xl border border-slate-200/80 p-4 sm:p-5 shadow-sm flex items-start justify-between">
+                  <div>
+                    <span className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                      THIS MONTH
+                    </span>
+                    <div className="mt-1.5 flex items-baseline gap-1.5">
+                      <span className="text-2xl sm:text-3xl font-black text-indigo-600">
+                        {
+                          paymentRecords.filter((r) =>
+                            String(r.joiningDate || '').startsWith(
+                              new Date().toISOString().slice(0, 7)
+                            )
+                          ).length
+                        }
+                      </span>
+                      <span className="text-xs font-semibold text-slate-500">New</span>
+                    </div>
+                    <p className="mt-1.5 text-[11px] font-bold text-indigo-600">
+                      চলতি মাসে টিউশন পেয়েছে
+                    </p>
+                  </div>
+                  <div className="h-10 w-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                    <Icon name="userPlus" size={18} />
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-3xl border border-slate-200/80 p-4 sm:p-5 shadow-sm flex items-start justify-between">
+                  <div>
+                    <span className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                      PAYMENT CLEARED
+                    </span>
+                    <div className="mt-1.5 flex items-baseline gap-1.5">
+                      <span className="text-2xl sm:text-3xl font-black text-emerald-600">
+                        {
+                          paymentRecords.filter((r) => {
+                            const d = Math.max(
+                              0,
+                              Number(r.dueAmount) !== undefined &&
+                                !Number.isNaN(Number(r.dueAmount))
+                                ? Number(r.dueAmount)
+                                : Math.max(
+                                    0,
+                                    (Number(r.monthlyFee) || 0) - (Number(r.paidAmount) || 0)
+                                  )
+                            );
+                            return d <= 0;
+                          }).length
+                        }
+                      </span>
+                      <span className="text-xs font-semibold text-slate-500">Teachers</span>
+                    </div>
+                    <p className="mt-1.5 text-[11px] font-bold text-emerald-600">
+                      মিডিয়া ফি সম্পূর্ণ পরিশোধিত
+                    </p>
+                  </div>
+                  <div className="h-10 w-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                    <Icon name="check" size={18} />
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-3xl border border-slate-200/80 p-4 sm:p-5 shadow-sm flex items-start justify-between">
+                  <div>
+                    <span className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                      DUE PENDING
+                    </span>
+                    <div className="mt-1.5 flex items-baseline gap-1.5">
+                      <span className="text-2xl sm:text-3xl font-black text-rose-600">
+                        {
+                          paymentRecords.filter((r) => {
+                            const d = Math.max(
+                              0,
+                              Number(r.dueAmount) !== undefined &&
+                                !Number.isNaN(Number(r.dueAmount))
+                                ? Number(r.dueAmount)
+                                : Math.max(
+                                    0,
+                                    (Number(r.monthlyFee) || 0) - (Number(r.paidAmount) || 0)
+                                  )
+                            );
+                            return d > 0;
+                          }).length
+                        }
+                      </span>
+                      <span className="text-xs font-semibold text-slate-500">Teachers</span>
+                    </div>
+                    <p className="mt-1.5 text-[11px] font-bold text-rose-600">
+                      মিডিয়া ফি বকেয়া আছে
+                    </p>
+                  </div>
+                  <div className="h-10 w-10 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                    <Icon name="zap" size={18} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Assigned Teachers Cards Grid */}
+              {(() => {
+                const q = searchQuery.toLowerCase().trim();
+                const assignedList = paymentRecords.filter((rec) => {
+                  if (!q) return true;
+                  const hay = `${rec.tuitionCode} ${rec.tutorName} ${rec.tutorPhone} ${rec.tutorUniversity || ''} ${rec.studentName} ${rec.area} ${rec.joiningDate}`.toLowerCase();
+                  return hay.includes(q);
+                });
+
+                if (assignedList.length === 0) {
+                  return (
+                    <div className="bg-white rounded-3xl border border-slate-200 p-10 text-center">
+                      <div className="h-12 w-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+                        <Icon name="graduationCap" size={24} />
+                      </div>
+                      <p className="text-sm font-extrabold text-slate-800">
+                        এখনও কোনো টিচার টিউশন তালিকায় যুক্ত করা হয়নি
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                        উপরে &quot;+ Add Teacher&quot; বাটনে ক্লিক করে অথবা Find Tutors কার্ডের &quot;✓ Assign&quot; বাটনে ক্লিক করে যারা টিউশন পেয়েছে তাদের যুক্ত করুন।
+                      </p>
+                      <button
+                        onClick={() => {
+                          setEditingPaymentId(null);
+                          setNewPaymentForm(initialPaymentForm);
+                          setAddPaymentModalOpen(true);
+                        }}
+                        className="mt-4 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold inline-flex items-center gap-2 shadow-sm transition"
+                      >
+                        <Icon name="userPlus" size={14} />
+                        <span>+ Add Assigned Teacher</span>
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    className={`grid ${
+                      isMobileView
+                        ? 'grid-cols-1'
+                        : isTabletView
+                        ? 'grid-cols-2'
+                        : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'
+                    } gap-3.5`}
+                  >
+                    {assignedList.map((rec) => {
+                      const matchedPoolTutor = tutors.find(
+                        (t) =>
+                          t.phone === rec.tutorPhone ||
+                          t.name.toLowerCase() === rec.tutorName.toLowerCase()
+                      );
+                      const recDue = Math.max(
+                        0,
+                        Number(rec.dueAmount) !== undefined &&
+                          !Number.isNaN(Number(rec.dueAmount))
+                          ? Number(rec.dueAmount)
+                          : Math.max(
+                              0,
+                              (Number(rec.monthlyFee) || 0) - (Number(rec.paidAmount) || 0)
+                            )
+                      );
+                      const avatarUrl =
+                        matchedPoolTutor?.avatar || getCleanAvatarUrl(rec.tutorName || 'Tutor');
+                      const uniDisplay =
+                        rec.tutorUniversity ||
+                        (matchedPoolTutor
+                          ? `${matchedPoolTutor.university}${
+                              matchedPoolTutor.department &&
+                              matchedPoolTutor.department !== 'Not Specified'
+                                ? ` • ${matchedPoolTutor.department}`
+                                : ''
+                            }`
+                          : 'Assigned Teacher');
+
+                      return (
+                        <div
+                          key={rec.id}
+                          className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-sm hover:shadow-md transition flex flex-col justify-between gap-3.5"
+                        >
+                          <div>
+                            {/* Top Row: Tuition Code + Joining Date + Due/Paid Status */}
+                            <div className="flex items-center justify-between gap-2 mb-3">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white text-xs font-extrabold">
+                                  {rec.tuitionCode}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-bold">
+                                  {rec.joiningDate}
+                                </span>
+                              </div>
+                              <span
+                                className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold ${
+                                  recDue > 0
+                                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                }`}
+                              >
+                                {recDue > 0
+                                  ? `Due: ৳${recDue.toLocaleString()}`
+                                  : '✓ Fully Paid'}
+                              </span>
+                            </div>
+
+                            {/* Teacher Profile Row */}
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={avatarUrl}
+                                alt={rec.tutorName}
+                                className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500 flex-shrink-0"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <h4 className="font-extrabold text-sm text-slate-900 truncate">
+                                  {rec.tutorName}
+                                </h4>
+                                <p className="text-xs text-emerald-700 font-bold truncate">
+                                  {uniDisplay}
+                                </p>
+                                <p className="text-xs font-mono font-bold text-slate-600 mt-0.5">
+                                  📞 {rec.tutorPhone || 'Not Provided'}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Assigned Student & Location Box */}
+                            <div className="mt-3.5 p-3 bg-slate-50 rounded-xl border border-slate-100 grid grid-cols-2 gap-2 text-xs">
+                              <div>
+                                <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                                  Student Name
+                                </span>
+                                <span className="font-extrabold text-slate-800 truncate block">
+                                  {rec.studentName || 'Student'}
+                                </span>
+                              </div>
+                              <div className="border-l border-slate-200 pl-2.5">
+                                <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                                  Tuition Location
+                                </span>
+                                <span className="font-extrabold text-indigo-700 truncate block">
+                                  {rec.area || 'Dhaka'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Financial Summary Bar */}
+                            <div className="mt-2.5 grid grid-cols-3 gap-2 p-2.5 bg-white rounded-xl border border-slate-200/80 text-center text-xs">
+                              <div>
+                                <span className="text-[10px] font-bold text-slate-400 block">
+                                  Monthly Fee
+                                </span>
+                                <span className="font-extrabold text-slate-900">
+                                  ৳ {Number(rec.monthlyFee).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="border-x border-slate-100">
+                                <span className="text-[10px] font-bold text-slate-400 block">
+                                  Paid
+                                </span>
+                                <span className="font-extrabold text-emerald-700">
+                                  ৳ {Number(rec.paidAmount).toLocaleString()}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] font-bold text-slate-400 block">
+                                  Due
+                                </span>
+                                <span
+                                  className={`font-extrabold ${
+                                    recDue > 0 ? 'text-rose-600' : 'text-slate-500'
+                                  }`}
+                                >
+                                  ৳ {recDue.toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Card Footer Actions */}
+                          <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5">
+                              {matchedPoolTutor && (
+                                <button
+                                  onClick={() => setSelectedTutorForProfile(matchedPoolTutor)}
+                                  className="px-2.5 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition"
+                                >
+                                  Profile
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleOpenEditPaymentModal(rec)}
+                                className="px-2.5 py-1.5 text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl inline-flex items-center gap-1 transition"
+                              >
+                                <Icon name="sliders" size={12} />
+                                <span>Edit</span>
+                              </button>
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => {
+                                  setSelectedTutorForSms({
+                                    name: rec.tutorName,
+                                    phone: rec.tutorPhone,
+                                  });
+                                  setSmsText(
+                                    `আসসালামু আলাইকুম ${rec.tutorName},\nআপনার টিউশন (${rec.tuitionCode} - ${rec.studentName}, ${rec.area}) পেমেন্ট আপডেট: পরিশোধিত ৳${rec.paidAmount}${
+                                      recDue > 0
+                                        ? `, বকেয়া (Due): ৳${recDue}`
+                                        : ' (সম্পূর্ণ পরিশোধিত)'
+                                    }। ধন্যবাদ — Active Tutors`
+                                  );
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition"
+                              >
+                                <Icon name="send" size={12} />
+                                <span>Message</span>
+                              </button>
+                              <button
+                                onClick={() => handleDeletePaymentRecord(rec.id)}
+                                title="Delete Assigned Teacher Record"
+                                className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition inline-flex items-center justify-center"
+                              >
+                                <Icon name="trash" size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
           {/* TAB 3: SETTINGS */}
           {activeTab === 'settings' && (
             <div
@@ -6365,7 +6901,7 @@ export default function App() {
 
         {/* MOBILE BOTTOM NAVIGATION BAR (AUTO-DISPLAYED ON MOBILE SCREENS) */}
         {isMobileView && (
-          <nav className="fixed bottom-0 inset-x-0 w-full max-w-full z-40 bg-slate-900 text-slate-300 border-t border-slate-800 grid grid-cols-5 h-14 select-none shadow-2xl">
+          <nav className="fixed bottom-0 inset-x-0 w-full max-w-full z-40 bg-slate-900 text-slate-300 border-t border-slate-800 grid grid-cols-6 h-14 select-none shadow-2xl">
             <button
               type="button"
               onClick={() => setActiveTab('find')}
@@ -6387,10 +6923,21 @@ export default function App() {
               <Icon name="inbox" size={16} />
               <span className="truncate">Requests</span>
               {tuitionRequests.length > 0 && (
-                <span className="absolute top-1 right-2.5 px-1 min-w-[14px] h-3.5 rounded-full bg-emerald-500 text-slate-950 text-[9px] font-black flex items-center justify-center">
+                <span className="absolute top-1 right-1.5 px-1 min-w-[14px] h-3.5 rounded-full bg-emerald-500 text-slate-950 text-[9px] font-black flex items-center justify-center">
                   {tuitionRequests.length}
                 </span>
               )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('assigned')}
+              className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-bold transition ${
+                activeTab === 'assigned' ? 'text-emerald-400' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Icon name="graduationCap" size={16} />
+              <span className="truncate">Teachers</span>
             </button>
 
             <button
